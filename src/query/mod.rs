@@ -9,6 +9,7 @@ pub enum Query {
     Select(Select),
     Insert(Insert),
     Create(Create),
+    Drop(Drop),
 }
 
 impl FromStr for Query {
@@ -33,8 +34,8 @@ pub enum Selector {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Insert {
-    table: Var,
-    values: Vec<Value>,
+    pub table: Var,
+    pub values: Vec<Value>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -46,8 +47,8 @@ pub enum Value {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Create {
-    table: Var,
-    fields: Vec<Field>,
+    pub table: Var,
+    pub fields: Vec<Field>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -59,6 +60,11 @@ pub enum Type {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Field {
-    name: Var,
-    type_: Type,
+    pub name: Var,
+    pub type_: Type,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Drop {
+    pub table: Var,
 }

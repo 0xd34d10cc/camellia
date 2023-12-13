@@ -1,4 +1,4 @@
-use super::{Create, Field, Insert, Query, Select, Selector, Type, Value, Var};
+use super::{Create, Drop, Field, Insert, Query, Select, Selector, Type, Value, Var};
 
 use nom::branch::alt;
 use nom::bytes::complete::{take_while, take_while1};
@@ -28,6 +28,7 @@ fn query(input: Input) -> Parsed<Query> {
         map(select, Query::Select),
         map(insert, Query::Insert),
         map(create, Query::Create),
+        map(drop, Query::Drop),
     ))(input)
 }
 
@@ -69,6 +70,27 @@ fn value(input: Input) -> Parsed<Value> {
     ))(input)
 }
 
+fn bool(input: Input) -> Parsed<bool> {
+    use nom::combinator::value;
+
+    alt((value(true, key("true")), value(false, key("false"))))(input)
+}
+
+fn integer(input: Input) -> Parsed<i64> {
+    preceded(spaces, nom::character::complete::i64)(input)
+}
+
+fn str_lit(input: Input) -> Parsed<String> {
+    use nom::character::complete::none_of;
+    use nom::multi::fold_many0;
+
+    let str_internals = fold_many0(none_of("'"), String::new, |mut s, c| {
+        s.push(c);
+        s
+    });
+    delimited(key("'"), str_internals, char('\''))(input)
+}
+
 fn create(input: Input) -> Parsed<Create> {
     let (input, table) = preceded(pair(ikey("create"), ikey("table")), variable)(input)?;
     let (input, fields) = delimited(key("("), fields, key(")"))(input)?;
@@ -100,25 +122,10 @@ fn type_(input: Input) -> Parsed<Type> {
     ))(input)
 }
 
-fn bool(input: Input) -> Parsed<bool> {
-    use nom::combinator::value;
-
-    alt((value(true, key("true")), value(false, key("false"))))(input)
-}
-
-fn integer(input: Input) -> Parsed<i64> {
-    preceded(spaces, nom::character::complete::i64)(input)
-}
-
-fn str_lit(input: Input) -> Parsed<String> {
-    use nom::character::complete::none_of;
-    use nom::multi::fold_many0;
-
-    let str_internals = fold_many0(none_of("'"), String::new, |mut s, c| {
-        s.push(c);
-        s
-    });
-    delimited(key("'"), str_internals, char('\''))(input)
+fn drop(input: Input) -> Parsed<Drop> {
+    let (input, table) = preceded(pair(ikey("drop"), ikey("table")), variable)(input)?;
+    let drop = Drop { table };
+    Ok((input, drop))
 }
 
 fn variable(input: Input) -> Parsed<Var> {
@@ -147,7 +154,7 @@ fn ikey<'a>(key: Input<'a>) -> impl FnMut(Input<'a>) -> Parsed<Input> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{Create, Field, Insert, Query, Select, Selector, Type, Value};
+    use crate::query::{Create, Drop, Field, Insert, Query, Select, Selector, Type, Value};
 
     #[test]
     fn select_all() {
@@ -233,6 +240,16 @@ mod tests {
         let actual: Query = "create table users (id int, name varchar(32), gender bool);"
             .parse()
             .unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn drop() {
+        let expected = Query::Drop(Drop {
+            table: "users".to_owned(),
+        });
+
+        let actual: Query = "drop table users;".parse().unwrap();
         assert_eq!(actual, expected);
     }
 }

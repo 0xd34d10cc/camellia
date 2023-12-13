@@ -1,0 +1,9 @@
+[package]
+name = "camellia"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.75"
+nom = "7.1.3"
+rustyline = "13.0.0"

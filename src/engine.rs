@@ -1,9 +1,10 @@
-use std::{fmt::Display, error::Error};
+use std::path::Path;
+use std::{error::Error, fmt::Display};
 
-use rocksdb::{Options, IteratorMode, Transaction};
+use rocksdb::{IteratorMode, Options, Transaction};
 use serde::{Deserialize, Serialize};
 
-use crate::query::{Field, Value, Query, self};
+use crate::query::{self, Field, Query, Value};
 
 type Database = rocksdb::TransactionDB<rocksdb::MultiThreaded>;
 
@@ -77,11 +78,16 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new(path: &str) -> Result<Self, Box<dyn Error>> {
-        use rocksdb::TransactionDBOptions;
-        let opts = Options::default();
-        let txn_db_opts = TransactionDBOptions::default();
-        let column_families = Database::list_cf(&opts, path)?;
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn Error>> {
+        let path = path.as_ref();
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        let txn_db_opts = rocksdb::TransactionDBOptions::default();
+        let column_families = if path.exists() {
+            Database::list_cf(&opts, path)?
+        } else {
+            Vec::new()
+        };
         let db = Database::open_cf(&opts, &txn_db_opts, path, column_families)?;
         Ok(Engine { db })
     }

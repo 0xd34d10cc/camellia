@@ -3,7 +3,7 @@ use super::{Create, Drop, Field, Insert, Query, Select, Selector, Type, Value, V
 use nom::branch::alt;
 use nom::bytes::complete::{take_while, take_while1};
 use nom::character::complete::char;
-use nom::combinator::{complete, map};
+use nom::combinator::map;
 use nom::multi::separated_list1;
 use nom::sequence::{delimited, pair, preceded, terminated};
 
@@ -13,10 +13,13 @@ pub type Parsed<'a, O> = nom::IResult<Input<'a>, O, ParseError<'a>>;
 
 // Reference: https://www.sqlite.org/lang.html
 pub fn parse(input: Input) -> Result<Query, String> {
+    use nom::combinator::{all_consuming, complete};
     use nom::error::convert_error;
     use nom::Err;
 
-    match complete(terminated(query, query_end))(input) {
+    let full_query = terminated(query, key(";"));
+    let complete_query = complete(full_query);
+    match all_consuming(complete_query)(input) {
         Ok(("", query)) => Ok(query),
         Err(Err::Error(e) | Err::Failure(e)) => Err(convert_error(input, e)),
         other => panic!("Unahandled case: {:?}", other),
@@ -30,11 +33,6 @@ fn query(input: Input) -> Parsed<Query> {
         map(create, Query::Create),
         map(drop, Query::Drop),
     ))(input)
-}
-
-fn query_end(input: Input) -> Parsed<Input> {
-    use nom::combinator::eof;
-    preceded(key(";"), eof)(input)
 }
 
 fn select(input: Input) -> Parsed<Select> {
@@ -103,22 +101,27 @@ fn fields(input: Input) -> Parsed<Vec<Field>> {
 }
 
 fn field(input: Input) -> Parsed<Field> {
+    use nom::combinator::{opt, value};
+
     let (input, name) = variable(input)?;
     let (input, type_) = type_(input)?;
-    let field = Field { name, type_ };
+    let primary_key = pair(ikey("primary"), ikey("key"));
+    let (input, primary_key) = opt(value(true, primary_key))(input)?;
+    let field = Field {
+        name,
+        type_,
+        primary_key: primary_key.unwrap_or(false),
+    };
     Ok((input, field))
 }
 
 fn type_(input: Input) -> Parsed<Type> {
-    use nom::combinator::{value, verify};
+    use nom::combinator::value;
 
-    let varchar = delimited(key("varchar("), integer, key(")"));
     alt((
         value(Type::Bool, key("bool")),
         value(Type::Integer, key("int")),
-        map(verify(varchar, |&size| size > 0), |size| {
-            Type::Varchar(size as usize)
-        }),
+        value(Type::Text, key("text")),
     ))(input)
 }
 
@@ -179,13 +182,13 @@ mod tests {
     }
 
     #[test]
-    fn select_case_insensitive() {
+    fn select_case() {
         let expected = Query::Select(Select {
             selector: Selector::Fields(vec!["FoO".to_owned(), "bAr".to_owned(), "BaZ".to_owned()]),
-            table: "table".to_owned(),
+            table: "tAbLe".to_owned(),
         });
 
-        let actual: Query = "SeLeCt FoO, bAr, BaZ fRoM table;".parse().unwrap();
+        let actual: Query = "SeLeCt FoO, bAr, BaZ fRoM tAbLe;".parse().unwrap();
         assert_eq!(actual, expected);
     }
 
@@ -225,19 +228,22 @@ mod tests {
                 Field {
                     name: "id".to_owned(),
                     type_: Type::Integer,
+                    primary_key: true,
                 },
                 Field {
                     name: "name".to_owned(),
-                    type_: Type::Varchar(32),
+                    type_: Type::Text,
+                    primary_key: false,
                 },
                 Field {
                     name: "gender".to_owned(),
                     type_: Type::Bool,
+                    primary_key: false,
                 },
             ],
         });
 
-        let actual: Query = "create table users (id int, name varchar(32), gender bool);"
+        let actual: Query = "create table users (id int primary key, name text, gender bool);"
             .parse()
             .unwrap();
         assert_eq!(actual, expected);

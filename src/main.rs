@@ -1,17 +1,19 @@
 use std::error::Error;
-use std::str::FromStr;
 
 use rustyline::DefaultEditor;
 
 mod engine;
-mod query;
+mod types;
 
 use engine::Engine;
-use query::Query;
+
+use sqlparser::dialect::GenericDialect;
+use sqlparser::parser::Parser;
 
 const HISTORY_PATH: &str = "history.txt";
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let dialect = GenericDialect {};
     let engine = Engine::new("camellia.db")?;
     let mut rl = DefaultEditor::new()?;
     if let Err(e) = rl.load_history(HISTORY_PATH) {
@@ -24,8 +26,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             continue;
         }
 
-        match Query::from_str(line) {
-            Ok(query) => match engine.run(query) {
+        match Parser::parse_sql(&dialect, line) {
+            Ok(program) => match engine.run(program) {
                 Ok(None) => {}
                 Ok(Some(rowset)) => {
                     println!("{}", rowset);

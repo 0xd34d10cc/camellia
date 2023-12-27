@@ -8,16 +8,23 @@ use sqlparser::ast::{
     Query, Select, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins, Values,
     WildcardAdditionalOptions,
 };
+use sqlparser::dialect::GenericDialect;
+use sqlparser::parser::Parser;
 
 use crate::types::{Type, Value};
 
 type Database = rocksdb::TransactionDB<rocksdb::MultiThreaded>;
-
 type Row = Vec<Value>;
+type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync + 'static>>;
+
+pub enum Output {
+    Rows(RowSet),
+    Affected(usize),
+}
 
 pub struct RowSet {
-    schema: Schema,
-    rows: Vec<Row>,
+    pub schema: Schema,
+    pub rows: Vec<Row>,
 }
 
 impl Display for RowSet {
@@ -42,12 +49,12 @@ impl Display for RowSet {
 }
 
 #[derive(Serialize, Deserialize)]
-struct Schema {
-    columns: Vec<ColumnDef>,
+pub struct Schema {
+    pub columns: Vec<ColumnDef>,
 }
 
 impl Schema {
-    fn check(&self, row: &[Value]) -> Result<usize, Box<dyn Error>> {
+    fn check(&self, row: &[Value]) -> Result<usize> {
         if row.len() != self.columns.len() {
             return Err(format!(
                 "number of fields does not match: expected {} but got {}",
@@ -84,7 +91,7 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn Error>> {
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
         let mut opts = Options::default();
         opts.create_if_missing(true);
@@ -98,8 +105,13 @@ impl Engine {
         Ok(Engine { db })
     }
 
-    pub fn run(&self, program: Vec<Statement>) -> Result<Option<RowSet>, Box<dyn Error>> {
-        println!("{:#?}", program);
+    pub fn run_sql(&self, program: &str) -> Result<Output> {
+        let dialect = GenericDialect {};
+        let program = Parser::parse_sql(&dialect, program)?;
+        self.run(program)
+    }
+
+    pub fn run(&self, program: Vec<Statement>) -> Result<Output> {
         if program.len() != 1 {
             return Err("Cannot run more than one statement at time".into());
         }
@@ -108,7 +120,7 @@ impl Engine {
         self.execute(statement)
     }
 
-    fn execute(&self, statement: Statement) -> Result<Option<RowSet>, Box<dyn Error>> {
+    fn execute(&self, statement: Statement) -> Result<Output> {
         match statement {
             Statement::CreateTable {
                 name,
@@ -149,7 +161,7 @@ impl Engine {
                 && with_options.is_empty() =>
             {
                 self.create(name, columns)?;
-                Ok(None)
+                Ok(Output::Affected(0))
             }
             Statement::Drop {
                 object_type: ObjectType::Table,
@@ -161,7 +173,7 @@ impl Engine {
                 temporary: false,
             } if names.len() == 1 => {
                 self.drop(names.into_iter().next().unwrap())?;
-                Ok(None)
+                Ok(Output::Affected(0))
             }
             Statement::Query(query) => {
                 let rows = self.query(*query)?;
@@ -182,13 +194,13 @@ impl Engine {
                 returning: None,
             } if columns.is_empty() && after_columns.is_empty() => {
                 self.insert(table_name, *source)?;
-                Ok(None)
+                Ok(Output::Affected(1))
             }
             _ => Err("Not supported".into()),
         }
     }
 
-    fn query(&self, query: Query) -> Result<Option<RowSet>, Box<dyn Error>> {
+    fn query(&self, query: Query) -> Result<Output> {
         let query = match query {
             Query {
                 with: None,
@@ -210,7 +222,7 @@ impl Engine {
         }
     }
 
-    fn create(&self, name: ObjectName, columns: Vec<ColumnDef>) -> Result<(), Box<dyn Error>> {
+    fn create(&self, name: ObjectName, columns: Vec<ColumnDef>) -> Result<()> {
         let table = name.to_string();
         for column in &columns {
             type_of(column)?;
@@ -239,7 +251,7 @@ impl Engine {
         Ok(())
     }
 
-    fn drop(&self, name: ObjectName) -> Result<(), Box<dyn Error>> {
+    fn drop(&self, name: ObjectName) -> Result<()> {
         let table = name.to_string();
         let transaction = self.db.transaction();
         transaction.delete(&table)?;
@@ -248,7 +260,7 @@ impl Engine {
         Ok(())
     }
 
-    fn insert(&self, name: ObjectName, source: Query) -> Result<(), Box<dyn Error>> {
+    fn insert(&self, name: ObjectName, source: Query) -> Result<()> {
         let expr = match source {
             Query {
                 with: None,
@@ -291,7 +303,7 @@ impl Engine {
         Ok(())
     }
 
-    fn select(&self, query: Select) -> Result<Option<RowSet>, Box<dyn Error>> {
+    fn select(&self, query: Select) -> Result<Output> {
         let table = match query {
             Select {
                 distinct: None,
@@ -363,16 +375,12 @@ impl Engine {
                     rowset.rows.push(row);
                 }
                 Some(Err(e)) => return Err(e.into()),
-                None => break Ok(Some(rowset)),
+                None => break Ok(Output::Rows(rowset)),
             }
         }
     }
 
-    fn read_schema(
-        &self,
-        table: &str,
-        transaction: &Transaction<'_, Database>,
-    ) -> Result<Schema, Box<dyn Error>> {
+    fn read_schema(&self, table: &str, transaction: &Transaction<'_, Database>) -> Result<Schema> {
         let bytes = transaction
             .get(table)?
             .ok_or("Schema for this table not found")?;
@@ -384,10 +392,13 @@ impl Engine {
 fn is_primary_key(column: &ColumnDef) -> bool {
     use sqlparser::ast::ColumnOption;
 
-    column.options.iter().any(|option| matches!(option.option, ColumnOption::Unique { is_primary: true }))
+    column
+        .options
+        .iter()
+        .any(|option| matches!(option.option, ColumnOption::Unique { is_primary: true }))
 }
 
-fn map_value(value: ast::Value) -> Result<Value, Box<dyn Error>> {
+fn map_value(value: ast::Value) -> Result<Value> {
     let value = match value {
         ast::Value::Boolean(val) => Value::Bool(val),
         ast::Value::Number(number, false) => Value::Int(number.parse::<i64>()?),
@@ -398,7 +409,7 @@ fn map_value(value: ast::Value) -> Result<Value, Box<dyn Error>> {
     Ok(value)
 }
 
-fn create_row(values: Values) -> Result<Row, Box<dyn Error>> {
+fn create_row(values: Values) -> Result<Row> {
     if values.explicit_row {
         return Err("Explicit row is not supported".into());
     }
@@ -421,7 +432,7 @@ fn create_row(values: Values) -> Result<Row, Box<dyn Error>> {
     Ok(dst)
 }
 
-fn type_of(column: &ColumnDef) -> Result<Type, Box<dyn Error>> {
+fn type_of(column: &ColumnDef) -> Result<Type> {
     match column.data_type {
         ast::DataType::Bool | ast::DataType::Boolean => Ok(Type::Bool),
         ast::DataType::Int(None) => Ok(Type::Integer),

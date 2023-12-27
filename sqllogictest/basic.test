@@ -1,0 +1,26 @@
+statement ok
+create table t(v1 int primary key, v2 int, v3 int)
+
+statement ok
+insert into t values(1,4,2)
+
+statement ok
+insert into t values(2,3,3)
+
+statement ok
+insert into t values(3,4,4)
+
+statement ok
+insert into t values(4,3,5)
+
+
+query T
+select * from t
+----
+1 4 2
+2 3 3
+3 4 4
+4 3 5
+
+statement ok
+drop table t

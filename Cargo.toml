@@ -15,6 +15,6 @@ sqlparser = { version = "0.40.0", features = ["serde"] }
 sqllogictest = "0.19.0"
 
 [[test]]
-name = "harness"
-path = "sqllogictest/harness.rs"
+name = "sqllogictest"
+path = "sqllogictest/sqllogictest.rs"
 harness = false

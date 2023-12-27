@@ -62,7 +62,7 @@ fn type_of(column: &ColumnDef) -> DefaultColumnType {
     match &column.data_type {
         ast::DataType::Int(None) => DefaultColumnType::Integer,
         ast::DataType::Text => DefaultColumnType::Text,
-        t => panic!("Unsupported data type: {:?}", t),
+        _ => DefaultColumnType::Any,
     }
 }
 
@@ -79,6 +79,7 @@ fn convert(rowset: RowSet) -> DBOutput<DefaultColumnType> {
 
 fn main() {
     // TODO: integrate https://github.com/risinglightdb/sqllogictest-sqlite
+    // also, see https://github.com/duckdb/duckdb/tree/main/test/sql
     // let pattern = "sqllogictest/sqllogictest-sqlite/test/**/*.test";
     let pattern = "sqllogictest/*.test";
     let paths = glob(pattern).expect("failed to find test files");

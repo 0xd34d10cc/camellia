@@ -1,5 +1,6 @@
 mod engine;
 mod types;
+mod ops;
 
-pub use crate::engine::{Engine, Output, RowSet};
-pub use types::{Type, Value};
+pub use crate::engine::{Engine, Output};
+pub use types::{Type, Value, RowSet};

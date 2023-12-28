@@ -4,6 +4,7 @@ use rustyline::DefaultEditor;
 
 mod engine;
 mod types;
+mod ops;
 
 use engine::{Engine, Output};
 

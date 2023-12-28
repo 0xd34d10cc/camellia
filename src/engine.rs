@@ -1,166 +1,19 @@
 use std::path::Path;
-use std::{error::Error, fmt::Display};
 
 use rocksdb::{IteratorMode, Options, Transaction};
-use serde::{Deserialize, Serialize};
 use sqlparser::ast::{
-    self, ColumnDef, Expr, GroupByExpr, HiveDistributionStyle, HiveFormat, Ident, ObjectName,
-    ObjectType, Query, Select, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins, Values,
-    WildcardAdditionalOptions,
+    self, ColumnDef, Expr, GroupByExpr, HiveDistributionStyle, HiveFormat, ObjectName, ObjectType,
+    Query, Select, SetExpr, Statement, TableFactor, TableWithJoins, Values,
 };
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
-use crate::types::{Type, Value};
-
-type Database = rocksdb::TransactionDB<rocksdb::MultiThreaded>;
-type Row = Vec<Value>;
-type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync + 'static>>;
+use crate::ops::{self, FullScan, Operation, Projection};
+use crate::types::{Database, Result, Row, RowSet, Schema, Type, Value};
 
 pub enum Output {
     Rows(RowSet),
     Affected(usize),
-}
-
-pub struct RowSet {
-    pub schema: Schema,
-    pub rows: Vec<Row>,
-}
-
-impl Display for RowSet {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use comfy_table::Table;
-
-        let mut table = Table::new();
-        let header: Vec<_> = self
-            .schema
-            .columns
-            .iter()
-            .map(|field| field.name.clone())
-            .collect();
-        table.set_header(header);
-        for row in &self.rows {
-            let row: Vec<_> = row.iter().map(|value| value.to_string()).collect();
-            table.add_row(row);
-        }
-
-        write!(f, "{}", table)
-    }
-}
-
-#[derive(Debug)]
-enum Projection {
-    All,
-    Fields(Vec<usize>), // indexes, sorted
-}
-
-impl Projection {
-    fn new(schema: &Schema, projection: &[SelectItem]) -> Result<Self> {
-        if let [SelectItem::Wildcard(WildcardAdditionalOptions {
-            opt_except: None,
-            opt_exclude: None,
-            opt_rename: None,
-            opt_replace: None,
-        })] = projection
-        {
-            return Ok(Projection::All);
-        }
-
-        let mut fields = Vec::new();
-        for item in projection {
-            match item {
-                SelectItem::Wildcard(WildcardAdditionalOptions {
-                    opt_except: None,
-                    opt_exclude: None,
-                    opt_rename: None,
-                    opt_replace: None,
-                }) => fields.extend(0..schema.columns.len()),
-                SelectItem::UnnamedExpr(Expr::Identifier(Ident {
-                    value,
-                    quote_style: None,
-                })) => {
-                    let index = schema
-                        .columns
-                        .iter()
-                        .position(|field| &field.name.value == value)
-                        .ok_or_else(|| format!("no such column: {}", value))?;
-                    fields.push(index);
-                }
-                _ => return Err("Unsupported projection type".into()),
-            }
-        }
-
-        Ok(Projection::Fields(fields))
-    }
-
-    fn apply(&self, row: Row) -> Row {
-        match self {
-            Projection::All => row,
-            Projection::Fields(indexes) => {
-                // TODO: reuse row?
-                let mut projected = Row::with_capacity(indexes.len());
-                for &index in indexes {
-                    projected.push(row[index].clone());
-                }
-
-                projected
-            }
-        }
-    }
-
-    fn schema(&self, schema: Schema) -> Schema {
-        match self {
-            Projection::All => schema,
-            Projection::Fields(indexes) => {
-                // TODO: reuse row?
-                let mut projected = Vec::with_capacity(indexes.len());
-                for &index in indexes {
-                    projected.push(schema.columns[index].clone());
-                }
-
-                Schema { columns: projected }
-            }
-        }
-    }
-}
-
-// TODO: decouple type system level schema from table schema
-#[derive(Serialize, Deserialize)]
-pub struct Schema {
-    pub columns: Vec<ColumnDef>,
-}
-
-impl Schema {
-    fn check(&self, row: &[Value]) -> Result<usize> {
-        if row.len() != self.columns.len() {
-            return Err(format!(
-                "number of fields does not match: expected {} but got {}",
-                self.columns.len(),
-                row.len()
-            )
-            .into());
-        }
-
-        let mut primary_key = None;
-        for (i, (column, value)) in self.columns.iter().zip(row).enumerate() {
-            let value_type = value.type_();
-            let column_type = type_of(column)?;
-            if value_type != column_type {
-                return Err(format!(
-                    "{} field type does not match: expected {} but got {}",
-                    column.name, column_type, value_type
-                )
-                .into());
-            }
-
-            if is_primary_key(column) && primary_key.replace(i).is_some() {
-                return Err("Duplicate primary key".into());
-            }
-        }
-
-        let i = primary_key.ok_or("No primary key in schema")?;
-        Ok(i)
-    }
 }
 
 pub struct Engine {
@@ -353,7 +206,7 @@ impl Engine {
             _ => return Err("Unsupported insert statement kind".into()),
         };
 
-        let values = match expr {
+        let row = match expr {
             SetExpr::Values(values) => create_row(values)?,
             _ => return Err("Unsupported insert expression kind".into()),
         };
@@ -363,19 +216,21 @@ impl Engine {
 
         let transaction = self.db.transaction();
         let schema = self.read_schema(&table, &transaction)?;
-        let primary_key_idx = schema.check(&values)?;
-        let key = match values[primary_key_idx] {
-            Value::Int(val) => val.to_be_bytes(),
-            _ => return Err("Unsupported primary key type".into()),
+        let primary_key = schema.check(&row)?;
+        let mut key = Vec::new();
+        match row.get(primary_key) {
+            Value::Int(val) => key.extend(val.to_be_bytes()),
+            Value::Bool(val) => key.push(*val as u8),
+            Value::String(val) => key.extend(val.as_bytes()),
         };
 
-        if transaction.get_for_update_cf(&cf, key, true)?.is_some() {
+        if transaction.get_for_update_cf(&cf, &key, true)?.is_some() {
             return Err("Entry with such primary key already exist".into());
         }
 
-        let row: Row = values;
-        let value = bincode::serialize(&row)?;
-        transaction.put_cf(&cf, key, value)?;
+        let mut value = Vec::new();
+        row.serialize(&mut value)?;
+        transaction.put_cf(&cf, &key, value)?;
         transaction.commit()?;
         Ok(())
     }
@@ -428,24 +283,21 @@ impl Engine {
 
         let cf = self.db.cf_handle(&table).ok_or("No such table")?;
         let transaction = self.db.transaction();
-        let mut rowset = RowSet {
-            schema: self.read_schema(&table, &transaction)?,
-            rows: Vec::new(),
-        };
+        let schema = self.read_schema(&table, &transaction)?;
 
-        let projection = Projection::new(&rowset.schema, &projection)?;
-        // apply projection to schema
-        rowset.schema = projection.schema(rowset.schema);
-        let mut iter = transaction.iterator_cf(&cf, IteratorMode::Start);
+        let iter = transaction.iterator_cf(&cf, IteratorMode::Start);
+        let scan = FullScan::new(schema, iter)?;
+        let mut projection = Projection::new(&projection, Box::new(scan))?;
+
+        let schema = projection.schema().clone();
+        let mut rows = Vec::new();
         loop {
-            match iter.next() {
-                Some(Ok((_, value))) => {
-                    let row: Row = bincode::deserialize(&value)?;
-                    let row = projection.apply(row);
-                    rowset.rows.push(row);
+            match projection.poll() {
+                Ok(ops::Output::Finished) => break Ok(Output::Rows(RowSet { rows, schema })),
+                Ok(ops::Output::Batch(mut batch)) => {
+                    rows.append(&mut batch);
                 }
-                Some(Err(e)) => return Err(e.into()),
-                None => break Ok(Output::Rows(rowset)),
+                Err(e) => break Err(e),
             }
         }
     }
@@ -488,7 +340,7 @@ fn create_row(values: Values) -> Result<Row> {
         return Err("Expected exactly one row".into());
     }
 
-    let mut dst = Vec::new();
+    let mut row = Vec::new();
     let source = values.rows.into_iter().next().unwrap();
     for column in source {
         let value = match column {
@@ -496,10 +348,10 @@ fn create_row(values: Values) -> Result<Row> {
             _ => return Err("Unsupported expression type (create_row)".into()),
         };
 
-        dst.push(value)
+        row.push(value)
     }
 
-    Ok(dst)
+    Ok(Row::from(row))
 }
 
 fn type_of(column: &ColumnDef) -> Result<Type> {

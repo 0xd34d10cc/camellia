@@ -71,7 +71,7 @@ fn convert(rowset: RowSet) -> DBOutput<DefaultColumnType> {
     let rows = rowset
         .rows
         .iter()
-        .map(|row| row.iter().map(|val| val.to_string()).collect())
+        .map(|row| row.values().map(|val| val.to_string()).collect())
         .collect();
 
     DBOutput::Rows { types, rows }

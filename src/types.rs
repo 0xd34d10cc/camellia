@@ -20,7 +20,7 @@ impl Display for Type {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub enum Value {
     Bool(bool),
     Int(i64),

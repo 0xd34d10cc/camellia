@@ -4,8 +4,8 @@ use std::{error::Error, fmt::Display};
 use rocksdb::{IteratorMode, Options, Transaction};
 use serde::{Deserialize, Serialize};
 use sqlparser::ast::{
-    self, ColumnDef, Expr, GroupByExpr, HiveDistributionStyle, HiveFormat, ObjectName, ObjectType,
-    Query, Select, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins, Values,
+    self, ColumnDef, Expr, GroupByExpr, HiveDistributionStyle, HiveFormat, Ident, ObjectName,
+    ObjectType, Query, Select, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins, Values,
     WildcardAdditionalOptions,
 };
 use sqlparser::dialect::GenericDialect;
@@ -48,6 +48,83 @@ impl Display for RowSet {
     }
 }
 
+#[derive(Debug)]
+enum Projection {
+    All,
+    Fields(Vec<usize>), // indexes, sorted
+}
+
+impl Projection {
+    fn new(schema: &Schema, projection: &[SelectItem]) -> Result<Self> {
+        if let [SelectItem::Wildcard(WildcardAdditionalOptions {
+            opt_except: None,
+            opt_exclude: None,
+            opt_rename: None,
+            opt_replace: None,
+        })] = projection
+        {
+            return Ok(Projection::All);
+        }
+
+        let mut fields = Vec::new();
+        for item in projection {
+            match item {
+                SelectItem::Wildcard(WildcardAdditionalOptions {
+                    opt_except: None,
+                    opt_exclude: None,
+                    opt_rename: None,
+                    opt_replace: None,
+                }) => fields.extend(0..schema.columns.len()),
+                SelectItem::UnnamedExpr(Expr::Identifier(Ident {
+                    value,
+                    quote_style: None,
+                })) => {
+                    let index = schema
+                        .columns
+                        .iter()
+                        .position(|field| &field.name.value == value)
+                        .ok_or_else(|| format!("no such column: {}", value))?;
+                    fields.push(index);
+                }
+                _ => return Err("Unsupported projection type".into()),
+            }
+        }
+
+        Ok(Projection::Fields(fields))
+    }
+
+    fn apply(&self, row: Row) -> Row {
+        match self {
+            Projection::All => row,
+            Projection::Fields(indexes) => {
+                // TODO: reuse row?
+                let mut projected = Row::with_capacity(indexes.len());
+                for &index in indexes {
+                    projected.push(row[index].clone());
+                }
+
+                projected
+            }
+        }
+    }
+
+    fn schema(&self, schema: Schema) -> Schema {
+        match self {
+            Projection::All => schema,
+            Projection::Fields(indexes) => {
+                // TODO: reuse row?
+                let mut projected = Vec::with_capacity(indexes.len());
+                for &index in indexes {
+                    projected.push(schema.columns[index].clone());
+                }
+
+                Schema { columns: projected }
+            }
+        }
+    }
+}
+
+// TODO: decouple type system level schema from table schema
 #[derive(Serialize, Deserialize)]
 pub struct Schema {
     pub columns: Vec<ColumnDef>,
@@ -304,7 +381,7 @@ impl Engine {
     }
 
     fn select(&self, query: Select) -> Result<Output> {
-        let table = match query {
+        let (table, projection) = match query {
             Select {
                 distinct: None,
                 top: None,
@@ -320,8 +397,7 @@ impl Engine {
                 having: None,
                 named_window,
                 qualify: None,
-            } if projection.len() == 1
-                && from.len() == 1
+            } if from.len() == 1
                 && lateral_views.is_empty()
                 && group_by_exprs.is_empty()
                 && cluster_by.is_empty()
@@ -329,16 +405,6 @@ impl Engine {
                 && sort_by.is_empty()
                 && named_window.is_empty() =>
             {
-                match projection.into_iter().next().unwrap() {
-                    SelectItem::Wildcard(WildcardAdditionalOptions {
-                        opt_except: None,
-                        opt_exclude: None,
-                        opt_rename: None,
-                        opt_replace: None,
-                    }) => {}
-                    _ => return Err("Unsupported projection type".into()),
-                }
-
                 match from.into_iter().next().unwrap() {
                     TableWithJoins {
                         relation:
@@ -352,12 +418,12 @@ impl Engine {
                             },
                         joins,
                     } if joins.is_empty() && with_hints.is_empty() && partitions.is_empty() => {
-                        name.to_string()
+                        (name.to_string(), projection)
                     }
                     _ => return Err("Unsupported select source".into()),
                 }
             }
-            _ => return Err("Unusupported select kind".into()),
+            _ => return Err("Unsupported select kind".into()),
         };
 
         let cf = self.db.cf_handle(&table).ok_or("No such table")?;
@@ -367,11 +433,15 @@ impl Engine {
             rows: Vec::new(),
         };
 
+        let projection = Projection::new(&rowset.schema, &projection)?;
+        // apply projection to schema
+        rowset.schema = projection.schema(rowset.schema);
         let mut iter = transaction.iterator_cf(&cf, IteratorMode::Start);
         loop {
             match iter.next() {
                 Some(Ok((_, value))) => {
                     let row: Row = bincode::deserialize(&value)?;
+                    let row = projection.apply(row);
                     rowset.rows.push(row);
                 }
                 Some(Err(e)) => return Err(e.into()),

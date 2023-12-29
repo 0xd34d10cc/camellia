@@ -120,11 +120,43 @@ impl Display for Type {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Value {
     Bool(bool),
     Int(i64),
     String(String),
+}
+
+impl Value {
+    pub fn try_from(value: ast::Value) -> Result<Value> {
+        let value = match value {
+            ast::Value::Boolean(val) => Value::Bool(val),
+            ast::Value::Number(number, false) => Value::Int(number.parse::<i64>()?),
+            ast::Value::SingleQuotedString(string) => Value::String(string),
+            _ => return Err("Unsupported value type".into()),
+        };
+
+        Ok(value)
+    }
+
+    pub fn type_(&self) -> Type {
+        match self {
+            Value::Bool(_) => Type::Bool,
+            Value::Int(_) => Type::Integer,
+            Value::String(_) => Type::Text,
+        }
+    }
+}
+
+impl PartialOrd for Value {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (Value::Bool(left), Value::Bool(right)) => Some(left.cmp(right)),
+            (Value::Int(left), Value::Int(right)) => Some(left.cmp(right)),
+            (Value::String(left), Value::String(right)) => Some(left.cmp(right)),
+            _ => None,
+        }
+    }
 }
 
 impl Display for Value {
@@ -133,16 +165,6 @@ impl Display for Value {
             Value::Bool(val) => write!(f, "{}", val),
             Value::Int(val) => write!(f, "{}", val),
             Value::String(val) => write!(f, "{}", val),
-        }
-    }
-}
-
-impl Value {
-    pub fn type_(&self) -> Type {
-        match self {
-            Value::Bool(_) => Type::Bool,
-            Value::Int(_) => Type::Integer,
-            Value::String(_) => Type::Text,
         }
     }
 }

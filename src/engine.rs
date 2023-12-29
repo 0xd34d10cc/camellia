@@ -8,7 +8,7 @@ use sqlparser::ast::{
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
-use crate::ops::{self, FullScan, Operation, Projection};
+use crate::ops::{self, Filter, FullScan, Operation, Projection};
 use crate::types::{Database, Result, Row, RowSet, Schema, Type, Value};
 
 pub enum Output {
@@ -148,7 +148,7 @@ impl Engine {
 
         match query {
             SetExpr::Select(select) => self.select(*select),
-            _ => Err("Not supported".into()),
+            _ => Err("Unsupported query kind".into()),
         }
     }
 
@@ -236,7 +236,7 @@ impl Engine {
     }
 
     fn select(&self, query: Select) -> Result<Output> {
-        let (table, projection) = match query {
+        let (table, projection, selection) = match query {
             Select {
                 distinct: None,
                 top: None,
@@ -244,7 +244,7 @@ impl Engine {
                 into: None,
                 from,
                 lateral_views,
-                selection: None,
+                selection,
                 group_by: GroupByExpr::Expressions(group_by_exprs),
                 cluster_by,
                 distribute_by,
@@ -273,7 +273,7 @@ impl Engine {
                             },
                         joins,
                     } if joins.is_empty() && with_hints.is_empty() && partitions.is_empty() => {
-                        (name.to_string(), projection)
+                        (name.to_string(), projection, selection)
                     }
                     _ => return Err("Unsupported select source".into()),
                 }
@@ -286,13 +286,21 @@ impl Engine {
         let schema = self.read_schema(&table, &transaction)?;
 
         let iter = transaction.iterator_cf(&cf, IteratorMode::Start);
-        let scan = FullScan::new(schema, iter)?;
-        let mut projection = Projection::new(&projection, Box::new(scan))?;
+        let source = FullScan::new(schema, iter)?;
+        let source: Box<dyn Operation> = match selection {
+            Some(selection) => {
+                let filter = Filter::new(selection, Box::new(source))?;
+                Box::new(filter)
+            }
+            None => Box::new(source),
+        };
 
-        let schema = projection.schema().clone();
+        let mut source = Projection::new(&projection, source)?;
+
+        let schema = source.schema().clone();
         let mut rows = Vec::new();
         loop {
-            match projection.poll() {
+            match source.poll() {
                 Ok(ops::Output::Finished) => break Ok(Output::Rows(RowSet { rows, schema })),
                 Ok(ops::Output::Batch(mut batch)) => {
                     rows.append(&mut batch);
@@ -320,17 +328,6 @@ fn is_primary_key(column: &ColumnDef) -> bool {
         .any(|option| matches!(option.option, ColumnOption::Unique { is_primary: true }))
 }
 
-fn map_value(value: ast::Value) -> Result<Value> {
-    let value = match value {
-        ast::Value::Boolean(val) => Value::Bool(val),
-        ast::Value::Number(number, false) => Value::Int(number.parse::<i64>()?),
-        ast::Value::SingleQuotedString(string) => Value::String(string),
-        _ => return Err("Unsupported value type".into()),
-    };
-
-    Ok(value)
-}
-
 fn create_row(values: Values) -> Result<Row> {
     if values.explicit_row {
         return Err("Explicit row is not supported".into());
@@ -344,7 +341,7 @@ fn create_row(values: Values) -> Result<Row> {
     let source = values.rows.into_iter().next().unwrap();
     for column in source {
         let value = match column {
-            Expr::Value(value) => map_value(value)?,
+            Expr::Value(value) => Value::try_from(value)?,
             _ => return Err("Unsupported expression type (create_row)".into()),
         };
 

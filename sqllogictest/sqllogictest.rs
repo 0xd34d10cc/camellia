@@ -78,8 +78,11 @@ fn convert(rowset: RowSet) -> DBOutput<DefaultColumnType> {
 }
 
 fn main() {
-    // TODO: integrate https://github.com/risinglightdb/sqllogictest-sqlite
-    // also, see https://github.com/duckdb/duckdb/tree/main/test/sql
+    // Links:
+    // - https://github.com/risinglightdb/sqllogictest-sqlite
+    // - https://github.com/MaterializeInc/materialize/tree/main/test/sqllogictest
+    // - https://github.com/cockroachdb/cockroach/tree/master/pkg/sql/logictest/testdata/logic_test
+    // - https://github.com/duckdb/duckdb/tree/main/test/sql
     // let pattern = "sqllogictest/sqllogictest-sqlite/test/**/*.test";
     let pattern = "sqllogictest/*.test";
     let paths = glob(pattern).expect("failed to find test files");

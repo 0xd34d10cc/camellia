@@ -120,7 +120,7 @@ impl Display for Type {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Value {
     Bool(bool),
     Int(i64),
@@ -146,14 +146,58 @@ impl Value {
             Value::String(_) => Type::Text,
         }
     }
-}
 
-impl PartialOrd for Value {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        match (self, other) {
-            (Value::Bool(left), Value::Bool(right)) => Some(left.cmp(right)),
-            (Value::Int(left), Value::Int(right)) => Some(left.cmp(right)),
-            (Value::String(left), Value::String(right)) => Some(left.cmp(right)),
+    pub fn add(&self, right: Value) -> Result<Value> {
+        let left = self.as_int().ok_or("Invalid ADD")?;
+        let right = right.as_int().ok_or("Invalid ADD")?;
+        Ok(Value::Int(left + right))
+    }
+
+    pub fn sub(&self, right: Value) -> Result<Value> {
+        let left = self.as_int().ok_or("Invalid SUB")?;
+        let right = right.as_int().ok_or("Invalid SUB")?;
+        Ok(Value::Int(left - right))
+    }
+
+    pub fn mul(&self, right: Value) -> Result<Value> {
+        let left = self.as_int().ok_or("Invalid MUL")?;
+        let right = right.as_int().ok_or("Invalid MUL")?;
+        Ok(Value::Int(left * right))
+    }
+
+    pub fn div(&self, right: Value) -> Result<Value> {
+        let left = self.as_int().ok_or("Invalid DIV")?;
+        let right = right.as_int().ok_or("Invalid DIV")?;
+        if right == 0 {
+            return Err("Division by zero".into());
+        }
+        Ok(Value::Int(left + right))
+    }
+
+    pub fn and(&self, right: Value) -> Result<Value> {
+        let left = self.as_bool().ok_or("Invalid AND")?;
+        let right = right.as_bool().ok_or("Invalid AND")?;
+        Ok(Value::Bool(left && right))
+    }
+
+    pub fn or(&self, right: Value) -> Result<Value> {
+        let left = self.as_bool().ok_or("Invalid OR")?;
+        let right = right.as_bool().ok_or("Invalid OR")?;
+        Ok(Value::Bool(left || right))
+    }
+
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            Value::Bool(val) => Some(*val),
+            Value::Int(val) => Some(*val != 0),
+            _ => None,
+        }
+    }
+
+    pub fn as_int(&self) -> Option<i64> {
+        match self {
+            Value::Bool(val) => Some(*val as i64),
+            Value::Int(val) => Some(*val),
             _ => None,
         }
     }

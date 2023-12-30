@@ -3,12 +3,12 @@ use std::path::Path;
 use rocksdb::{IteratorMode, Options, Transaction};
 use sqlparser::ast::{
     self, ColumnDef, Expr, GroupByExpr, HiveDistributionStyle, HiveFormat, ObjectName, ObjectType,
-    Query, Select, SetExpr, Statement, TableFactor, TableWithJoins, Values,
+    OrderByExpr, Query, Select, SetExpr, Statement, TableFactor, TableWithJoins, Values,
 };
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
-use crate::ops::{self, Filter, FullScan, Operation, Projection};
+use crate::ops::{self, Filter, FullScan, Operation, OrderBy, Projection};
 use crate::types::{Database, Result, Row, RowSet, Schema, Type, Value};
 
 pub enum Output {
@@ -102,7 +102,8 @@ impl Engine {
                 purge: false,
                 temporary: false,
             } if names.len() == 1 => {
-                self.drop(names.into_iter().next().unwrap())?;
+                let name = names.into_iter().next().unwrap();
+                self.drop(name)?;
                 Ok(Output::Affected(0))
             }
             Statement::Query(query) => {
@@ -131,7 +132,7 @@ impl Engine {
     }
 
     fn query(&self, query: Query) -> Result<Output> {
-        let query = match query {
+        let (query, order_by) = match query {
             Query {
                 with: None,
                 body,
@@ -142,12 +143,12 @@ impl Engine {
                 fetch: None,
                 locks,
                 for_clause: None,
-            } if order_by.is_empty() && limit_by.is_empty() && locks.is_empty() => *body,
+            } if limit_by.is_empty() && locks.is_empty() => (*body, order_by),
             _ => return Err("Not implemented".into()),
         };
 
         match query {
-            SetExpr::Select(select) => self.select(*select),
+            SetExpr::Select(select) => self.select(*select, order_by),
             _ => Err("Unsupported query kind".into()),
         }
     }
@@ -235,7 +236,12 @@ impl Engine {
         Ok(())
     }
 
-    fn select(&self, query: Select) -> Result<Output> {
+    fn select(&self, query: Select, order_by: Vec<OrderByExpr>) -> Result<Output> {
+        if order_by.len() > 1 {
+            return Err("Unsupported order by kind".into());
+        }
+
+        let order_by = order_by.into_iter().next();
         let (table, projection, selection) = match query {
             Select {
                 distinct: None,
@@ -286,17 +292,18 @@ impl Engine {
         let schema = self.read_schema(&table, &transaction)?;
 
         let iter = transaction.iterator_cf(&cf, IteratorMode::Start);
-        let source = FullScan::new(schema, iter)?;
-        let source: Box<dyn Operation> = match selection {
-            Some(selection) => {
-                let filter = Filter::new(selection, Box::new(source))?;
-                Box::new(filter)
-            }
-            None => Box::new(source),
-        };
+        let mut source = Box::new(FullScan::new(schema, iter)?) as Box<dyn Operation>;
+        if let Some(selection) = selection {
+            let filter = Filter::new(selection, source)?;
+            source = Box::new(filter)
+        }
+
+        if let Some(order_by) = order_by {
+            let order_by = OrderBy::new(order_by, source)?;
+            source = Box::new(order_by);
+        }
 
         let mut source = Projection::new(&projection, source)?;
-
         let schema = source.schema().clone();
         let mut rows = Vec::new();
         loop {

@@ -3,10 +3,12 @@ use crate::types::{Result, Row, Schema};
 mod fullscan;
 mod projection;
 mod filter;
+mod order_by;
 
 pub use fullscan::FullScan;
 pub use projection::Projection;
 pub use filter::Filter;
+pub use order_by::OrderBy;
 
 pub enum Output {
     Batch(Vec<Row>),

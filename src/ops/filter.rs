@@ -29,7 +29,7 @@ impl<'a> Operation for Filter<'a> {
         match self.inner.poll()? {
             Output::Batch(mut batch) => {
                 // TODO: handle errors
-                batch.retain(|row| self.filter.eval(row).unwrap().as_bool().unwrap());
+                batch.retain(|row| self.filter.eval(row).unwrap().to_bool().unwrap());
                 Ok(Output::Batch(batch))
             }
             Output::Finished => Ok(Output::Finished),

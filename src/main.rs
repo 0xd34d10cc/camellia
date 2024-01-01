@@ -5,7 +5,6 @@ use rustyline::DefaultEditor;
 mod engine;
 mod types;
 mod ops;
-mod temp_storage;
 mod expression;
 
 use engine::{Engine, Output};

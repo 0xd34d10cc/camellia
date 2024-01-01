@@ -148,26 +148,26 @@ impl Value {
     }
 
     pub fn add(&self, right: Value) -> Result<Value> {
-        let left = self.as_int().ok_or("Invalid ADD")?;
-        let right = right.as_int().ok_or("Invalid ADD")?;
+        let left = self.to_int().ok_or("Invalid ADD")?;
+        let right = right.to_int().ok_or("Invalid ADD")?;
         Ok(Value::Int(left + right))
     }
 
     pub fn sub(&self, right: Value) -> Result<Value> {
-        let left = self.as_int().ok_or("Invalid SUB")?;
-        let right = right.as_int().ok_or("Invalid SUB")?;
+        let left = self.to_int().ok_or("Invalid SUB")?;
+        let right = right.to_int().ok_or("Invalid SUB")?;
         Ok(Value::Int(left - right))
     }
 
     pub fn mul(&self, right: Value) -> Result<Value> {
-        let left = self.as_int().ok_or("Invalid MUL")?;
-        let right = right.as_int().ok_or("Invalid MUL")?;
+        let left = self.to_int().ok_or("Invalid MUL")?;
+        let right = right.to_int().ok_or("Invalid MUL")?;
         Ok(Value::Int(left * right))
     }
 
     pub fn div(&self, right: Value) -> Result<Value> {
-        let left = self.as_int().ok_or("Invalid DIV")?;
-        let right = right.as_int().ok_or("Invalid DIV")?;
+        let left = self.to_int().ok_or("Invalid DIV")?;
+        let right = right.to_int().ok_or("Invalid DIV")?;
         if right == 0 {
             return Err("Division by zero".into());
         }
@@ -175,18 +175,18 @@ impl Value {
     }
 
     pub fn and(&self, right: Value) -> Result<Value> {
-        let left = self.as_bool().ok_or("Invalid AND")?;
-        let right = right.as_bool().ok_or("Invalid AND")?;
+        let left = self.to_bool().ok_or("Invalid AND")?;
+        let right = right.to_bool().ok_or("Invalid AND")?;
         Ok(Value::Bool(left && right))
     }
 
     pub fn or(&self, right: Value) -> Result<Value> {
-        let left = self.as_bool().ok_or("Invalid OR")?;
-        let right = right.as_bool().ok_or("Invalid OR")?;
+        let left = self.to_bool().ok_or("Invalid OR")?;
+        let right = right.to_bool().ok_or("Invalid OR")?;
         Ok(Value::Bool(left || right))
     }
 
-    pub fn as_bool(&self) -> Option<bool> {
+    pub fn to_bool(&self) -> Option<bool> {
         match self {
             Value::Bool(val) => Some(*val),
             Value::Int(val) => Some(*val != 0),
@@ -194,7 +194,7 @@ impl Value {
         }
     }
 
-    pub fn as_int(&self) -> Option<i64> {
+    pub fn to_int(&self) -> Option<i64> {
         match self {
             Value::Bool(val) => Some(*val as i64),
             Value::Int(val) => Some(*val),

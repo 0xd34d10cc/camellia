@@ -8,7 +8,7 @@ use sqlparser::ast::{
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
-use crate::ops::{self, Filter, FullScan, Operation, OrderBy, Projection};
+use crate::ops::{self, Filter, FullScan, Operation, Projection, Sort};
 use crate::types::{Database, Result, Row, RowSet, Schema, Type, Value};
 
 pub enum Output {
@@ -299,8 +299,8 @@ impl Engine {
         }
 
         if let Some(order_by) = order_by {
-            let order_by = OrderBy::new(order_by, source)?;
-            source = Box::new(order_by);
+            let sort = Sort::new(order_by, source)?;
+            source = Box::new(sort);
         }
 
         let mut source = Projection::new(&projection, source)?;

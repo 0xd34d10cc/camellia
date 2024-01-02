@@ -1,15 +1,21 @@
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::{Arc, RwLock};
 
 use rocksdb::{IteratorMode, Options, Transaction};
 use sqlparser::ast::{
-    self, ColumnDef, Expr, GroupByExpr, HiveDistributionStyle, HiveFormat, ObjectName, ObjectType,
+    ColumnDef, Expr, GroupByExpr, HiveDistributionStyle, HiveFormat, ObjectName, ObjectType,
     OrderByExpr, Query, Select, SetExpr, Statement, TableFactor, TableWithJoins, Values,
 };
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
 use crate::ops::{self, Filter, FullScan, Operation, Projection, Sort};
-use crate::types::{Database, Result, Row, RowSet, Schema, Type, Value};
+use crate::schema::Schema;
+use crate::table::Table;
+use crate::types::{Database, Result, Row, RowSet, Value};
+
+type ColumnFamily<'db> = Arc<rocksdb::BoundColumnFamily<'db>>;
 
 pub enum Output {
     Rows(RowSet),
@@ -18,6 +24,8 @@ pub enum Output {
 
 pub struct Engine {
     db: Database,
+
+    tables: RwLock<HashMap<String, Arc<Table>>>,
 }
 
 impl Engine {
@@ -32,7 +40,8 @@ impl Engine {
             Vec::new()
         };
         let db = Database::open_cf(&opts, &txn_db_opts, path, column_families)?;
-        Ok(Engine { db })
+        let tables = RwLock::new(HashMap::new());
+        Ok(Engine { db, tables })
     }
 
     pub fn run_sql(&self, program: &str) -> Result<Output> {
@@ -156,15 +165,7 @@ impl Engine {
     fn create(&self, name: ObjectName, columns: Vec<ColumnDef>) -> Result<()> {
         let table = name.to_string();
         for column in &columns {
-            type_of(column)?;
-        }
-
-        let primary_keys = columns
-            .iter()
-            .filter(|column| is_primary_key(column))
-            .count();
-        if primary_keys != 1 {
-            return Err("Exactly one field of table must be marked as primary key".into());
+            crate::types::type_of(column)?;
         }
 
         let opts = Options::default();
@@ -175,7 +176,7 @@ impl Engine {
             return Err("Table with such name already exist, but shouldn't".into());
         }
 
-        let schema = Schema { columns };
+        let schema = Schema::new(columns)?;
         let schema = bincode::serialize(&schema)?;
         transaction.put(&table, schema)?;
         transaction.commit()?;
@@ -216,15 +217,9 @@ impl Engine {
         let cf = self.db.cf_handle(&table).ok_or("No such table")?;
 
         let transaction = self.db.transaction();
-        let schema = self.read_schema(&table, &transaction)?;
-        let primary_key = schema.check(&row)?;
-        let mut key = Vec::new();
-        match row.get(primary_key) {
-            Value::Int(val) => key.extend(val.to_be_bytes()),
-            Value::Bool(val) => key.push(*val as u8),
-            Value::String(val) => key.extend(val.as_bytes()),
-        };
-
+        let table = self.get_table(table, &cf, &transaction)?;
+        table.schema().check(&row)?;
+        let key = table.get_key(&row);
         if transaction.get_for_update_cf(&cf, &key, true)?.is_some() {
             return Err("Entry with such primary key already exist".into());
         }
@@ -289,7 +284,8 @@ impl Engine {
 
         let cf = self.db.cf_handle(&table).ok_or("No such table")?;
         let transaction = self.db.transaction();
-        let schema = self.read_schema(&table, &transaction)?;
+        let table = self.get_table(table, &cf, &transaction)?;
+        let schema = table.schema().clone();
 
         let iter = transaction.iterator_cf(&cf, IteratorMode::Start);
         let mut source = Box::new(FullScan::new(schema, iter)?) as Box<dyn Operation>;
@@ -317,6 +313,32 @@ impl Engine {
         }
     }
 
+    fn get_table(
+        &self,
+        table: String,
+        cf: &ColumnFamily<'_>,
+        transaction: &Transaction<'_, Database>,
+    ) -> Result<Arc<Table>> {
+        if let Some(table) = self.tables.read().unwrap().get(&table).cloned() {
+            return Ok(table);
+        }
+
+        let schema = self.read_schema(&table, transaction)?;
+        let hidden_pk = if schema.primary_key.is_none() {
+            self.read_hidden_pk(cf, transaction)?
+        } else {
+            0
+        };
+
+        let t = Arc::new(Table::new(schema, hidden_pk));
+        self.tables
+            .write()
+            .unwrap()
+            .entry(table)
+            .or_insert(t.clone());
+        Ok(t)
+    }
+
     fn read_schema(&self, table: &str, transaction: &Transaction<'_, Database>) -> Result<Schema> {
         let bytes = transaction
             .get(table)?
@@ -324,15 +346,23 @@ impl Engine {
         let schema = bincode::deserialize(&bytes)?;
         Ok(schema)
     }
-}
 
-fn is_primary_key(column: &ColumnDef) -> bool {
-    use sqlparser::ast::ColumnOption;
-
-    column
-        .options
-        .iter()
-        .any(|option| matches!(option.option, ColumnOption::Unique { is_primary: true }))
+    fn read_hidden_pk(
+        &self,
+        cf: &ColumnFamily<'_>,
+        transaction: &Transaction<'_, Database>,
+    ) -> Result<u64> {
+        let mut iter = transaction.iterator_cf(cf, IteratorMode::End);
+        match iter.next().transpose()? {
+            Some((key, _value)) => {
+                assert!(key.len() == 8);
+                Ok(u64::from_be_bytes([
+                    key[0], key[1], key[2], key[3], key[4], key[5], key[6], key[7],
+                ]))
+            }
+            None => Ok(0),
+        }
+    }
 }
 
 fn create_row(values: Values) -> Result<Row> {
@@ -356,13 +386,4 @@ fn create_row(values: Values) -> Result<Row> {
     }
 
     Ok(Row::from(row))
-}
-
-fn type_of(column: &ColumnDef) -> Result<Type> {
-    match column.data_type {
-        ast::DataType::Bool | ast::DataType::Boolean => Ok(Type::Bool),
-        ast::DataType::Int(None) => Ok(Type::Integer),
-        ast::DataType::Text => Ok(Type::Text),
-        _ => Err("Unsupported column type".into()),
-    }
 }

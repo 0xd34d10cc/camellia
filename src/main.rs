@@ -3,9 +3,11 @@ use std::error::Error;
 use rustyline::DefaultEditor;
 
 mod engine;
-mod types;
-mod ops;
 mod expression;
+mod ops;
+mod schema;
+mod table;
+mod types;
 
 use engine::{Engine, Output};
 

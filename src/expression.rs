@@ -1,6 +1,7 @@
 use sqlparser::ast::{BinaryOperator, Expr, Ident};
 
-use crate::types::{Result, Row, Schema, Value};
+use crate::schema::Schema;
+use crate::types::{Result, Row, Value};
 
 pub enum Op {
     Add,
@@ -83,9 +84,8 @@ impl Expression {
                 quote_style: None,
             }) => {
                 let index = schema
-                    .columns
-                    .iter()
-                    .position(|column| column.name.value == value)
+                    .columns()
+                    .position(|column| column.name == value)
                     .ok_or_else(|| format!("No such column: {}", value))?;
                 Ok(Expression::Field(index))
             }

@@ -1,25 +1,26 @@
 use rocksdb::{DBIteratorWithThreadMode, Transaction};
 
-use crate::types::{Database, Result, Row, Schema};
+use crate::schema::Schema;
+use crate::types::{Database, Result, Row};
 
 use super::{Operation, Output};
 
-// TODO: get rid of lifetimes
-pub struct FullScan<'a> {
+// TODO: get rid of lifetimes?
+pub struct FullScan<'txn> {
     schema: Schema,
-    iter: DBIteratorWithThreadMode<'a, Transaction<'a, Database>>,
+    iter: DBIteratorWithThreadMode<'txn, Transaction<'txn, Database>>,
 }
 
-impl<'a> FullScan<'a> {
+impl<'txn> FullScan<'txn> {
     pub fn new(
         schema: Schema,
-        iter: DBIteratorWithThreadMode<'a, Transaction<'a, Database>>,
+        iter: DBIteratorWithThreadMode<'txn, Transaction<'txn, Database>>,
     ) -> Result<Self> {
         Ok(FullScan { schema, iter })
     }
 }
 
-impl<'a> Operation for FullScan<'a> {
+impl<'txn> Operation for FullScan<'txn> {
     fn schema(&self) -> &Schema {
         &self.schema
     }

@@ -4,7 +4,8 @@ use sqlparser::ast::OrderByExpr;
 
 use super::{Operation, Output};
 use crate::expression::Expression;
-use crate::types::{Result, Row, Schema, Value};
+use crate::schema::Schema;
+use crate::types::{Result, Row, Value};
 
 enum State {
     Read,
@@ -12,20 +13,21 @@ enum State {
     Emit,
 }
 
-pub struct Sort<'a> {
-    inner: Box<dyn Operation + 'a>,
+// TODO: consider sorting on (key, row_id) instead of (key, row)
+pub struct Sort<'txn> {
+    inner: Box<dyn Operation + 'txn>,
 
     by: Expression,
     // TODO: use disk-backed storage for runs
     runs: Vec<Vec<Row>>,
     // TODO: use disk-backed storage for result
-    iter: std::vec::IntoIter<Row>,
+    results: std::vec::IntoIter<Row>,
 
     state: State,
 }
 
-impl<'a> Sort<'a> {
-    pub fn new(by: OrderByExpr, inner: Box<dyn Operation + 'a>) -> Result<Self> {
+impl<'txn> Sort<'txn> {
+    pub fn new(by: OrderByExpr, inner: Box<dyn Operation + 'txn>) -> Result<Self> {
         if let Some(false) = by.asc {
             return Err("DESC is not implemented".into());
         }
@@ -40,7 +42,7 @@ impl<'a> Sort<'a> {
             inner,
             by,
             runs: Vec::new(),
-            iter: Vec::new().into_iter(),
+            results: Vec::new().into_iter(),
 
             state: State::Read,
         })
@@ -126,10 +128,6 @@ impl<'a> Sort<'a> {
 
         let mut runs = std::mem::take(&mut self.runs);
         loop {
-            if runs.len() <= 1 {
-                break Ok(());
-            }
-
             const N: usize = 16;
             for chunk in runs.chunks_mut(N) {
                 let merged = self.nway_merge(chunk);
@@ -137,6 +135,9 @@ impl<'a> Sort<'a> {
             }
 
             runs.clear();
+            if self.runs.len() <= 1 {
+                break Ok(());
+            }
             std::mem::swap(&mut self.runs, &mut runs);
         }
     }
@@ -145,7 +146,7 @@ impl<'a> Sort<'a> {
         const BATCH_SIZE: usize = 1024;
         let mut chunk = Vec::with_capacity(BATCH_SIZE);
         loop {
-            match self.iter.next() {
+            match self.results.next() {
                 Some(row) => {
                     chunk.push(row);
                     if chunk.len() >= BATCH_SIZE {
@@ -164,7 +165,7 @@ impl<'a> Sort<'a> {
     }
 }
 
-impl<'a> Operation for Sort<'a> {
+impl<'txn> Operation for Sort<'txn> {
     fn schema(&self) -> &Schema {
         self.inner.schema()
     }
@@ -183,7 +184,7 @@ impl<'a> Operation for Sort<'a> {
                     let runs = std::mem::take(&mut self.runs);
                     debug_assert!(runs.len() <= 1);
                     if let Some(all) = runs.into_iter().next() {
-                        self.iter = all.into_iter();
+                        self.results = all.into_iter();
                     }
                     self.state = State::Emit;
                 }

@@ -1,0 +1,52 @@
+statement ok
+create table t(v1 int, v2 int, v3 text)
+
+statement ok
+insert into t values(1,4,'foo')
+
+statement ok
+insert into t values(2,3,'bar')
+
+statement ok
+insert into t values(3,4,'baz')
+
+statement ok
+insert into t values(4,3,'baz')
+
+query I
+select v1 from t where v2 = 3
+----
+2
+4
+
+query I
+select v1 from t where v1 > 2
+----
+3
+4
+
+query I
+select v1 from t where v3 = 'baz'
+----
+3
+4
+
+query I
+select v1 from t where v3 = 'baz' or v1 = 1;
+----
+1
+3
+4
+
+query I
+select v1 from t where v3 = 'baz' and v2 > 3
+----
+3
+
+# returns empty set instead of type error
+query I
+select v1 from t where v1 > 'abc'
+----
+
+statement ok
+drop table t

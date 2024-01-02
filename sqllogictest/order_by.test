@@ -1,0 +1,33 @@
+statement ok
+create table t(v1 int primary key, v2 int, v3 text)
+
+statement ok
+insert into t values(1,4,'foo')
+
+statement ok
+insert into t values(2,3,'bar')
+
+statement ok
+insert into t values(3,4,'baz')
+
+statement ok
+insert into t values(4,3,'baz')
+
+query IIT
+select * from t order by v2
+----
+2 3 bar
+4 3 baz
+1 4 foo
+3 4 baz
+
+query IIT
+select v1, v3 from t order by v3
+----
+2 bar
+3 baz
+4 baz
+1 foo
+
+statement ok
+drop table t

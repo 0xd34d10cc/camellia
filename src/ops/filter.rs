@@ -1,26 +1,25 @@
 use sqlparser::ast::Expr;
 
 use super::{Operation, Output};
-use crate::{
-    expression::Expression,
-    types::{Result, Schema},
-};
+use crate::expression::Expression;
+use crate::schema::Schema;
+use crate::types::Result;
 
-pub struct Filter<'a> {
-    inner: Box<dyn Operation + 'a>,
+pub struct Filter<'txn> {
+    inner: Box<dyn Operation + 'txn>,
 
     filter: Expression,
 }
 
-impl<'a> Filter<'a> {
-    pub fn new(selection: Expr, inner: Box<dyn Operation + 'a>) -> Result<Self> {
+impl<'txn> Filter<'txn> {
+    pub fn new(selection: Expr, inner: Box<dyn Operation + 'txn>) -> Result<Self> {
         let schema = inner.schema();
         let filter = Expression::parse(selection, schema)?;
         Ok(Filter { inner, filter })
     }
 }
 
-impl<'a> Operation for Filter<'a> {
+impl<'txn> Operation for Filter<'txn> {
     fn schema(&self) -> &Schema {
         self.inner.schema()
     }

@@ -1,13 +1,14 @@
-use crate::types::{Result, Row, Schema};
+use crate::schema::Schema;
+use crate::types::{Result, Row};
 
+mod filter;
 mod fullscan;
 mod projection;
-mod filter;
 mod sort;
 
+pub use filter::Filter;
 pub use fullscan::FullScan;
 pub use projection::Projection;
-pub use filter::Filter;
 pub use sort::Sort;
 
 pub enum Output {

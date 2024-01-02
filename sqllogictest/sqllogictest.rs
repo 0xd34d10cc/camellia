@@ -1,12 +1,10 @@
 use std::{error::Error, fmt, path::Path};
 
-use camellia::{Engine, Output, RowSet};
+use camellia::{Column, Engine, Output, RowSet, Type};
 use sqllogictest::{
     harness::{self, glob, Arguments, Failed, Trial},
     DBOutput, DefaultColumnType, MakeConnection, Runner,
 };
-use sqlparser::ast::{self, ColumnDef};
-
 struct BoxError(Box<dyn Error + Send + Sync + 'static>);
 
 impl fmt::Display for BoxError {
@@ -58,16 +56,16 @@ impl sqllogictest::DB for Database {
     }
 }
 
-fn type_of(column: &ColumnDef) -> DefaultColumnType {
-    match &column.data_type {
-        ast::DataType::Int(None) => DefaultColumnType::Integer,
-        ast::DataType::Text => DefaultColumnType::Text,
-        _ => DefaultColumnType::Any,
+fn type_of(column: &Column) -> DefaultColumnType {
+    match column.type_ {
+        Type::Integer => DefaultColumnType::Integer,
+        Type::Text => DefaultColumnType::Text,
+        Type::Bool => DefaultColumnType::Any,
     }
 }
 
 fn convert(rowset: RowSet) -> DBOutput<DefaultColumnType> {
-    let types = rowset.schema.columns.iter().map(type_of).collect();
+    let types = rowset.schema.columns().map(type_of).collect();
     let rows = rowset
         .rows
         .iter()
@@ -99,7 +97,10 @@ fn main() {
         panic!("no test found for sqllogictest under: {}", pattern);
     }
 
-    harness::run(&Arguments::from_args(), tests).exit();
+    let mut args = Arguments::from_args();
+    // TODO: support multithreaded testing
+    args.test_threads = Some(1);
+    harness::run(&args, tests).exit();
 }
 
 fn test(filename: impl AsRef<Path>, make_conn: impl MakeConnection) -> Result<(), Failed> {

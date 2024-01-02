@@ -1,19 +1,19 @@
 use sqlparser::ast::{Expr, Ident, SelectItem, WildcardAdditionalOptions};
 
-use crate::types::{Result, Row, Schema};
+use crate::schema::Schema;
+use crate::types::{Result, Row};
 
 use super::{Operation, Output};
 
-// TODO: get rid of lifetimes
-pub struct Projection<'a> {
-    inner: Box<dyn Operation + 'a>,
+pub struct Projection<'txn> {
+    inner: Box<dyn Operation + 'txn>,
 
     schema: Schema,
     indexes: Vec<usize>,
 }
 
-impl<'a> Projection<'a> {
-    pub fn new(projection: &[SelectItem], inner: Box<dyn Operation + 'a>) -> Result<Self> {
+impl<'txn> Projection<'txn> {
+    pub fn new(projection: &[SelectItem], inner: Box<dyn Operation + 'txn>) -> Result<Self> {
         let schema = inner.schema();
         let mut indexes = Vec::new();
         for item in projection {
@@ -23,15 +23,14 @@ impl<'a> Projection<'a> {
                     opt_exclude: None,
                     opt_rename: None,
                     opt_replace: None,
-                }) => indexes.extend(0..schema.columns.len()),
+                }) => indexes.extend(0..schema.num_columns()),
                 SelectItem::UnnamedExpr(Expr::Identifier(Ident {
                     value,
                     quote_style: None,
                 })) => {
                     let index = schema
-                        .columns
-                        .iter()
-                        .position(|field| &field.name.value == value)
+                        .columns()
+                        .position(|field| field.name == *value)
                         .ok_or_else(|| format!("no such column: {}", value))?;
                     indexes.push(index);
                 }
@@ -44,7 +43,10 @@ impl<'a> Projection<'a> {
             columns.push(schema.columns[index].clone());
         }
 
-        let schema = Schema { columns };
+        let schema = Schema {
+            primary_key: None,
+            columns,
+        };
 
         Ok(Self {
             schema,
@@ -53,7 +55,7 @@ impl<'a> Projection<'a> {
         })
     }
 
-    fn apply_one(&self, row: &mut Row) {
+    fn project(&self, row: &mut Row) {
         // TODO: avoid allocation?
         let mut projected = Vec::with_capacity(self.indexes.len());
         for &index in &self.indexes {
@@ -63,7 +65,7 @@ impl<'a> Projection<'a> {
     }
 }
 
-impl<'a> Operation for Projection<'a> {
+impl<'txn> Operation for Projection<'txn> {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -73,7 +75,7 @@ impl<'a> Operation for Projection<'a> {
             Output::Finished => Output::Finished,
             Output::Batch(mut rows) => {
                 for row in rows.iter_mut() {
-                    self.apply_one(row);
+                    self.project(row);
                 }
 
                 Output::Batch(rows)

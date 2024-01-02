@@ -26,6 +26,14 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
             continue;
         }
 
+        if line == ":log on" {
+            engine.set_log(true);
+            continue;
+        } else if line == ":log off" {
+            engine.set_log(false);
+            continue;
+        }
+
         match engine.run_sql(line) {
             Ok(Output::Affected(n)) => {
                 if n != 0 {

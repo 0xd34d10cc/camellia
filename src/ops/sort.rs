@@ -17,6 +17,7 @@ enum State {
 pub struct Sort<'txn> {
     inner: Box<dyn Operation + 'txn>,
 
+    // TODO: add specialization for single expression
     by: Vec<Expression>,
 
     // TODO: use disk-backed storage for runs

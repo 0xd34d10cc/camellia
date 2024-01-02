@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 use rocksdb::{IteratorMode, Options, Transaction};
@@ -24,6 +25,7 @@ pub enum Output {
 
 pub struct Engine {
     db: Database,
+    log: AtomicBool,
 
     tables: RwLock<HashMap<String, Arc<Table>>>,
 }
@@ -41,7 +43,15 @@ impl Engine {
         };
         let db = Database::open_cf(&opts, &txn_db_opts, path, column_families)?;
         let tables = RwLock::new(HashMap::new());
-        Ok(Engine { db, tables })
+        Ok(Engine {
+            db,
+            tables,
+            log: AtomicBool::new(false),
+        })
+    }
+
+    pub fn set_log(&self, on: bool) {
+        self.log.store(on, Ordering::Relaxed);
     }
 
     pub fn run_sql(&self, program: &str) -> Result<Output> {
@@ -56,6 +66,9 @@ impl Engine {
         }
 
         let statement = program.into_iter().next().unwrap();
+        if self.log.load(Ordering::Relaxed) {
+            println!("{:#?}", statement);
+        }
         self.execute(statement)
     }
 

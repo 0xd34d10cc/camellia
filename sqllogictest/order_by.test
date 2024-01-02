@@ -22,6 +22,14 @@ select * from t order by v2
 3 4 baz
 
 query IIT
+select * from t order by v2, v3
+----
+2 3 bar
+4 3 baz
+3 4 baz
+1 4 foo
+
+query IIT
 select v1, v3 from t order by v3
 ----
 2 bar

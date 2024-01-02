@@ -5,7 +5,7 @@ use sqlparser::ast::OrderByExpr;
 use super::{Operation, Output};
 use crate::expression::Expression;
 use crate::schema::Schema;
-use crate::types::{Result, Row, Value};
+use crate::types::{Result, Row};
 
 enum State {
     Read,
@@ -17,7 +17,8 @@ enum State {
 pub struct Sort<'txn> {
     inner: Box<dyn Operation + 'txn>,
 
-    by: Expression,
+    by: Vec<Expression>,
+
     // TODO: use disk-backed storage for runs
     runs: Vec<Vec<Row>>,
     // TODO: use disk-backed storage for result
@@ -27,25 +28,40 @@ pub struct Sort<'txn> {
 }
 
 impl<'txn> Sort<'txn> {
-    pub fn new(by: OrderByExpr, inner: Box<dyn Operation + 'txn>) -> Result<Self> {
-        if let Some(false) = by.asc {
-            return Err("DESC is not implemented".into());
-        }
-
-        if by.nulls_first.is_some() {
-            return Err("NULLS FIRST is not implemented".into());
-        }
-
+    pub fn new(order_by: Vec<OrderByExpr>, inner: Box<dyn Operation + 'txn>) -> Result<Self> {
         let schema = inner.schema();
-        let by = Expression::parse(by.expr, schema)?;
+        let mut expressions = Vec::with_capacity(order_by.len());
+        for expr in order_by {
+            if let Some(false) = expr.asc {
+                return Err("DESC is not implemented".into());
+            }
+
+            if expr.nulls_first.is_some() {
+                return Err("NULLS FIRST is not implemented".into());
+            }
+
+            let expr = Expression::parse(expr.expr, schema)?;
+            expressions.push(expr);
+        }
+
         Ok(Self {
             inner,
-            by,
+
+            by: expressions,
             runs: Vec::new(),
             results: Vec::new().into_iter(),
 
             state: State::Read,
         })
+    }
+
+    fn key_of(&self, row: &Row) -> Result<Row> {
+        let mut key = Vec::with_capacity(self.by.len());
+        for e in &self.by {
+            let val = e.eval(row)?;
+            key.push(val);
+        }
+        Ok(Row::from(key))
     }
 
     fn read(&mut self) -> Result<()> {
@@ -54,7 +70,7 @@ impl<'txn> Sort<'txn> {
                 Output::Batch(mut batch) => {
                     // TODO: handle errors
                     // TODO: batch can be small, use chunks of N
-                    batch.sort_unstable_by_key(|row| self.by.eval(row).unwrap());
+                    batch.sort_by_cached_key(|row| self.key_of(row).unwrap());
                     self.runs.push(batch);
                 }
                 Output::Finished => {
@@ -67,7 +83,7 @@ impl<'txn> Sort<'txn> {
     // NOTE: consumes internals of |runs|
     fn nway_merge(&self, runs: &mut [Vec<Row>]) -> Vec<Row> {
         struct Item {
-            key: Value,
+            key: Row,
             row: Row,
 
             iter: std::vec::IntoIter<Row>,
@@ -100,7 +116,7 @@ impl<'txn> Sort<'txn> {
             let mut iter = std::mem::take(run).into_iter();
             if let Some(row) = iter.next() {
                 // TODO: handle error
-                let key = self.by.eval(&row).unwrap();
+                let key = self.key_of(&row).unwrap();
                 heap.push(Item { key, row, iter })
             }
         }
@@ -113,7 +129,7 @@ impl<'txn> Sort<'txn> {
             let mut iter = item.iter;
             if let Some(row) = iter.next() {
                 // TODO: handle error
-                let key = self.by.eval(&row).unwrap();
+                let key = self.key_of(&row).unwrap();
                 heap.push(Item { key, row, iter });
             }
         }

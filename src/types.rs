@@ -9,6 +9,7 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub type Result<T> = std::result::Result<T, BoxError>;
 pub type Database = rocksdb::TransactionDB<rocksdb::MultiThreaded>;
 
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub struct Row(Vec<Value>);
 
 impl Row {

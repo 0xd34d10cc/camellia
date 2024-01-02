@@ -232,11 +232,6 @@ impl Engine {
     }
 
     fn select(&self, query: Select, order_by: Vec<OrderByExpr>) -> Result<Output> {
-        if order_by.len() > 1 {
-            return Err("Unsupported order by kind".into());
-        }
-
-        let order_by = order_by.into_iter().next();
         let (table, projection, selection) = match query {
             Select {
                 distinct: None,
@@ -294,7 +289,7 @@ impl Engine {
             source = Box::new(filter)
         }
 
-        if let Some(order_by) = order_by {
+        if !order_by.is_empty() {
             let sort = Sort::new(order_by, source)?;
             source = Box::new(sort);
         }

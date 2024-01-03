@@ -21,6 +21,24 @@ select * from t order by v2
 1 4 foo
 3 4 baz
 
+# order by column number, should be same as above
+query IIT
+select * from t order by 2
+----
+2 3 bar
+4 3 baz
+1 4 foo
+3 4 baz
+
+statement error
+select * from t order by 4
+
+statement error
+select * from t order by 0
+
+statement error
+select * from t order by -1
+
 query IIT
 select * from t order by v2, v3
 ----
@@ -30,7 +48,23 @@ select * from t order by v2, v3
 1 4 foo
 
 query IIT
+select * from t order by 2, 3
+----
+2 3 bar
+4 3 baz
+3 4 baz
+1 4 foo
+
+query IT
 select v1, v3 from t order by v3
+----
+2 bar
+3 baz
+4 baz
+1 foo
+
+query IT
+select v1, v3 from t order by 3
 ----
 2 bar
 3 baz

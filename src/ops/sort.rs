@@ -5,7 +5,7 @@ use sqlparser::ast::OrderByExpr;
 use super::{Operation, Output};
 use crate::expression::Expression;
 use crate::schema::Schema;
-use crate::types::{Result, Row};
+use crate::types::{Result, Row, Value};
 
 enum State {
     Read,
@@ -42,6 +42,19 @@ impl<'txn> Sort<'txn> {
             }
 
             let expr = Expression::parse(expr.expr, schema)?;
+            let expr = match expr {
+                // ORDER BY allows to specify column by number instead of name
+                Expression::Const(Value::Int(n)) => {
+                    if n <= 0 || n > schema.num_columns() as i64 {
+                        return Err(
+                            format!("Invalid column number in ORDER BY clause: {}", n).into()
+                        );
+                    }
+                    // column numbers start from 1
+                    Expression::Field((n - 1) as usize)
+                }
+                e => e,
+            };
             expressions.push(expr);
         }
 

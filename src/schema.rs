@@ -88,6 +88,20 @@ pub enum Type {
     Text,
 }
 
+impl Type {
+    pub fn convertable_to(&self, type_: Type) -> bool {
+        if *self == type_ {
+            return true;
+        }
+
+        match self {
+            Type::Bool => type_ == Type::Integer,
+            Type::Integer => type_ == Type::Bool,
+            Type::Text => false,
+        }
+    }
+}
+
 impl Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

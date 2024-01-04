@@ -11,7 +11,7 @@ use sqlparser::ast::{
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
-use crate::ops::{self, Filter, FullScan, Operation, Projection, Sort};
+use crate::ops::{self, Eval, Filter, FullScan, Operation, Sort};
 use crate::schema::Schema;
 use crate::table::Table;
 use crate::types::{Database, Result, Row, RowSet, Value};
@@ -245,7 +245,7 @@ impl Engine {
     }
 
     fn select(&self, query: Select, order_by: Vec<OrderByExpr>) -> Result<Output> {
-        let (table, projection, selection) = match query {
+        let (table, expressions, selection) = match query {
             Select {
                 distinct: None,
                 top: None,
@@ -307,7 +307,7 @@ impl Engine {
             source = Box::new(sort);
         }
 
-        let mut source = Projection::new(&projection, source)?;
+        let mut source = Eval::new(expressions, source)?;
         let schema = source.schema().clone();
         let mut rows = Vec::new();
         loop {

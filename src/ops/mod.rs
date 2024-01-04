@@ -3,12 +3,12 @@ use crate::types::{Result, Row};
 
 mod filter;
 mod fullscan;
-mod projection;
+mod eval;
 mod sort;
 
 pub use filter::Filter;
 pub use fullscan::FullScan;
-pub use projection::Projection;
+pub use eval::Eval;
 pub use sort::Sort;
 
 pub enum Output {

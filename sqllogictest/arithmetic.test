@@ -1,0 +1,20 @@
+statement ok
+create table t(a int, b int);
+
+statement ok
+insert into t values(2, 3);
+
+statement ok
+insert into t values(4, 5);
+
+query I
+select a+b from t
+----
+5
+9
+
+query I
+select a-b, a*b, a/b from t
+----
+-1 6 0
+-1 20 0

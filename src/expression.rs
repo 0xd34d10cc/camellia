@@ -150,6 +150,7 @@ impl Expression {
                 // TODO: typecheck?
                 Ok(Expression::BinOp(Box::new(left), op, Box::new(right)))
             }
+            Expr::Nested(e) => Expression::parse(*e, schema),
             Expr::Identifier(Ident {
                 value,
                 quote_style: None,

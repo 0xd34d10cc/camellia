@@ -18,3 +18,19 @@ select a-b, a*b, a/b from t
 ----
 -1 6 0
 -1 20 0
+
+query I
+select a*(b+a) from t;
+----
+10
+36
+
+# TODO: make it work, currently panics
+# division by 0
+# statement error
+# select b/(a-4) from t
+
+# TODO: make it work, currently panics
+# integer overflow
+# statement error
+# select b*b*b*b*b*b*b*b*b*b*b*b*b*b*b*b*b*b*b*b*b*b*b*b*b*b*b*b*b*b*b*b*b*b from t;

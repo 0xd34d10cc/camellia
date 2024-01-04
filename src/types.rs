@@ -97,28 +97,29 @@ impl Value {
     pub fn add(&self, right: Value) -> Result<Value> {
         let left = self.to_int().ok_or("Invalid ADD")?;
         let right = right.to_int().ok_or("Invalid ADD")?;
-        Ok(Value::Int(left + right))
+        let result = left.checked_add(right).ok_or("Integer overflow on ADD")?;
+        Ok(Value::Int(result))
     }
 
     pub fn sub(&self, right: Value) -> Result<Value> {
         let left = self.to_int().ok_or("Invalid SUB")?;
         let right = right.to_int().ok_or("Invalid SUB")?;
-        Ok(Value::Int(left - right))
+        let result = left.checked_sub(right).ok_or("Integer overflow on SUB")?;
+        Ok(Value::Int(result))
     }
 
     pub fn mul(&self, right: Value) -> Result<Value> {
         let left = self.to_int().ok_or("Invalid MUL")?;
         let right = right.to_int().ok_or("Invalid MUL")?;
-        Ok(Value::Int(left * right))
+        let result = left.checked_mul(right).ok_or("Integer overflow on MUL")?;
+        Ok(Value::Int(result))
     }
 
     pub fn div(&self, right: Value) -> Result<Value> {
         let left = self.to_int().ok_or("Invalid DIV")?;
         let right = right.to_int().ok_or("Invalid DIV")?;
-        if right == 0 {
-            return Err("Division by zero".into());
-        }
-        Ok(Value::Int(left + right))
+        let result = left.checked_div(right).ok_or("Integer overflow on DIV")?;
+        Ok(Value::Int(result))
     }
 
     pub fn and(&self, right: Value) -> Result<Value> {

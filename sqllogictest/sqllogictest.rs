@@ -1,4 +1,8 @@
-use std::{error::Error, fmt, path::Path};
+use std::{
+    error::Error,
+    fmt,
+    path::{Path, PathBuf},
+};
 
 use camellia::{Column, Engine, Output, RowSet, Type};
 use sqllogictest::{
@@ -75,26 +79,33 @@ fn convert(rowset: RowSet) -> DBOutput<DefaultColumnType> {
     DBOutput::Rows { types, rows }
 }
 
-fn main() {
+fn test_files() -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
     // Links:
     // - https://github.com/risinglightdb/sqllogictest-sqlite
     // - https://github.com/MaterializeInc/materialize/tree/main/test/sqllogictest
     // - https://github.com/cockroachdb/cockroach/tree/master/pkg/sql/logictest/testdata/logic_test
     // - https://github.com/duckdb/duckdb/tree/main/test/sql
-    // let pattern = "sqllogictest/sqllogictest-sqlite/test/**/*.test";
     let pattern = "sqllogictest/*.test";
-    let paths = glob(pattern).expect("failed to find test files");
-    let mut tests = vec![];
+    let paths = glob(pattern)
+        .expect("failed to find test files")
+        .collect::<Result<Vec<_>, _>>()?;
+    // TODO: make it pass
+    // paths.push(Ok(PathBuf::from(
+    //     "sqllogictest/sqlite-tests/test/select1.test",
+    // )));
+    Ok(paths)
+}
 
-    for entry in paths {
-        let path = entry.expect("failed to read glob entry");
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut tests = vec![];
+    for path in test_files()? {
         tests.push(Trial::test(path.to_str().unwrap().to_string(), move || {
             test(&path, || async { Ok(Database::new()) })
         }));
     }
 
     if tests.is_empty() {
-        panic!("no test found for sqllogictest under: {}", pattern);
+        return Err("No tests found".into());
     }
 
     let mut args = Arguments::from_args();

@@ -1,0 +1,3 @@
+[submodule "sqllogictest/sqlite-tests"]
+	path = sqllogictest/sqlite-tests
+	url = https://github.com/gregrahn/sqllogictest

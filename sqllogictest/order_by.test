@@ -30,13 +30,13 @@ select * from t order by 2
 1 4 foo
 3 4 baz
 
-statement error
+query error
 select * from t order by 4
 
-statement error
+query error
 select * from t order by 0
 
-statement error
+query error
 select * from t order by -1
 
 query IIT
@@ -63,14 +63,16 @@ select v1, v3 from t order by v3
 4 baz
 1 foo
 
-# FIXME: fails, because column number is based on what's in SELECT(?)
-# query IT
-# select v1, v3 from t order by 3
-# ----
-# 2 bar
-# 3 baz
-# 4 baz
-# 1 foo
+query error
+select v1, v3 from t order by 3
+
+query IIII
+select v1, v1, v1, v2 from t order by 4
+----
+2 2 2 3
+4 4 4 3
+1 1 1 4
+3 3 3 4
 
 statement ok
 drop table t

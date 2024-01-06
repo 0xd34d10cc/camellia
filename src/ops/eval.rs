@@ -1,7 +1,5 @@
-use sqlparser::ast;
-
 use crate::expression::Expression;
-use crate::schema::{Column, Schema};
+use crate::schema::Schema;
 use crate::types::{Result, Row};
 
 use super::{Operation, Output};
@@ -14,48 +12,11 @@ pub struct Eval<'txn> {
 }
 
 impl<'txn> Eval<'txn> {
-    pub fn new(exprs: Vec<ast::SelectItem>, inner: Box<dyn Operation + 'txn>) -> Result<Self> {
-        let schema = inner.schema();
-        let mut columns = Vec::with_capacity(exprs.len());
-        let mut expressions = Vec::with_capacity(exprs.len());
-        for item in exprs {
-            match item {
-                ast::SelectItem::Wildcard(ast::WildcardAdditionalOptions {
-                    opt_except: None,
-                    opt_exclude: None,
-                    opt_rename: None,
-                    opt_replace: None,
-                }) => {
-                    for (i, column) in schema.columns().enumerate() {
-                        columns.push(column.clone());
-                        expressions.push(Expression::Field(i));
-                    }
-                }
-                ast::SelectItem::UnnamedExpr(expr) => {
-                    let e = Expression::parse(expr, schema)?;
-                    columns.push(Column {
-                        name: "?column?".into(),
-                        type_: e.result_type(schema)?,
-                    });
-                    expressions.push(e);
-                }
-                ast::SelectItem::ExprWithAlias { expr, alias } => {
-                    let e = Expression::parse(expr, schema)?;
-                    columns.push(Column {
-                        name: alias.to_string(),
-                        type_: e.result_type(schema)?,
-                    });
-                    expressions.push(e);
-                }
-                _ => return Err("Unsupported projection type".into()),
-            }
-        }
-
-        let schema = Schema {
-            primary_key: None,
-            columns,
-        };
-
+    pub fn new(
+        expressions: Vec<Expression>,
+        schema: Schema,
+        inner: Box<dyn Operation + 'txn>,
+    ) -> Result<Self> {
         Ok(Self {
             schema,
             expressions,

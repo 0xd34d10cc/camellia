@@ -8,6 +8,7 @@ use sqlparser::ast;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
+use crate::expression::Expression;
 use crate::ops::{self, Eval, Filter, FullScan, Operation, Sort};
 use crate::schema::Schema;
 use crate::table::Table;
@@ -310,12 +311,14 @@ impl Engine {
             source = Box::new(filter)
         }
 
+        // NOTE: this code expects that Sort operator does not alter row stream Schema, i.e. sort.schema() == source.schema()
+        let (schema, expressions) = expand_select(expressions, source.schema())?;
         if !order_by.is_empty() {
-            let sort = Sort::new(order_by, source)?;
+            let sort = Sort::new(order_by, &expressions, source)?;
             source = Box::new(sort);
         }
 
-        let mut source = Eval::new(expressions, source)?;
+        let mut source = Eval::new(expressions, schema, source)?;
         let schema = source.schema().clone();
         let mut rows = Vec::new();
         loop {
@@ -419,4 +422,53 @@ fn reorder(schema: &Schema, columns: Vec<ast::Ident>, row: Row) -> Result<Row> {
     }
 
     Ok(Row::from(values))
+}
+
+fn expand_select(
+    exprs: Vec<ast::SelectItem>,
+    schema: &Schema,
+) -> Result<(Schema, Vec<Expression>)> {
+    use crate::schema::Column;
+
+    let mut columns = Vec::with_capacity(exprs.len());
+    let mut expressions = Vec::with_capacity(exprs.len());
+    for item in exprs {
+        match item {
+            ast::SelectItem::Wildcard(ast::WildcardAdditionalOptions {
+                opt_except: None,
+                opt_exclude: None,
+                opt_rename: None,
+                opt_replace: None,
+            }) => {
+                for (i, column) in schema.columns().enumerate() {
+                    columns.push(column.clone());
+                    expressions.push(Expression::Field(i));
+                }
+            }
+            ast::SelectItem::UnnamedExpr(expr) => {
+                let e = Expression::parse(expr, schema)?;
+                columns.push(Column {
+                    name: "?column?".into(),
+                    type_: e.result_type(schema)?,
+                });
+                expressions.push(e);
+            }
+            ast::SelectItem::ExprWithAlias { expr, alias } => {
+                let e = Expression::parse(expr, schema)?;
+                columns.push(Column {
+                    name: alias.to_string(),
+                    type_: e.result_type(schema)?,
+                });
+                expressions.push(e);
+            }
+            _ => return Err("Unsupported projection type".into()),
+        }
+    }
+
+    let schema = Schema {
+        primary_key: None,
+        columns,
+    };
+
+    Ok((schema, expressions))
 }

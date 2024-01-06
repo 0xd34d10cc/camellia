@@ -42,6 +42,7 @@ impl fmt::Display for Op {
     }
 }
 
+#[derive(Clone)]
 pub enum Expression {
     Field(usize),
     Const(Value),

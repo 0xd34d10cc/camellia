@@ -1,6 +1,6 @@
 use std::collections::BinaryHeap;
 
-use sqlparser::ast::OrderByExpr;
+use sqlparser::ast;
 
 use super::{Operation, Output};
 use crate::expression::Expression;
@@ -29,7 +29,11 @@ pub struct Sort<'txn> {
 }
 
 impl<'txn> Sort<'txn> {
-    pub fn new(order_by: Vec<OrderByExpr>, inner: Box<dyn Operation + 'txn>) -> Result<Self> {
+    pub fn new(
+        order_by: Vec<ast::OrderByExpr>,
+        select: &[Expression],
+        inner: Box<dyn Operation + 'txn>,
+    ) -> Result<Self> {
         let schema = inner.schema();
         let mut expressions = Vec::with_capacity(order_by.len());
         for expr in order_by {
@@ -45,13 +49,17 @@ impl<'txn> Sort<'txn> {
             let expr = match expr {
                 // ORDER BY allows to specify column by number instead of name
                 Expression::Const(Value::Int(n)) => {
-                    if n <= 0 || n > schema.num_columns() as i64 {
-                        return Err(
-                            format!("Invalid column number in ORDER BY clause: {}", n).into()
-                        );
+                    if n <= 0 {
+                        return Err(format!("Invalid column number: {}", n).into());
                     }
-                    // column numbers start from 1
-                    Expression::Field((n - 1) as usize)
+                    let index = (n - 1) as usize;
+                    let e = select.get(index).ok_or_else(|| {
+                        format!(
+                            "ORDER BY term out of range - should be between 1 and {}",
+                            select.len()
+                        )
+                    })?;
+                    e.clone()
                 }
                 e => e,
             };

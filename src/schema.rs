@@ -36,10 +36,6 @@ impl Schema {
         self.columns.iter()
     }
 
-    pub fn num_columns(&self) -> usize {
-        self.columns.len()
-    }
-
     pub fn check(&self, row: &Row) -> Result<()> {
         if row.len() != self.columns.len() {
             return Err(format!(

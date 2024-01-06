@@ -48,6 +48,7 @@ pub enum Expression {
     Const(Value),
 
     BinOp(Box<Expression>, Op, Box<Expression>),
+    Case(Vec<(Expression, Expression)>, Option<Box<Expression>>),
 }
 
 impl Expression {
@@ -72,6 +73,21 @@ impl Expression {
                     Op::LessOrEqual => Ok(Value::Bool(left <= right)),
                     Op::Greater => Ok(Value::Bool(left > right)),
                     Op::GreaterOrEqual => Ok(Value::Bool(left >= right)),
+                }
+            }
+            Expression::Case(cases, otherwise) => {
+                for (condition, result) in cases {
+                    if condition.eval(row)?.to_bool().unwrap() {
+                        return result.eval(row);
+                    }
+                }
+
+                if let Some(otherwise) = otherwise {
+                    otherwise.eval(row)
+                } else {
+                    // ¯\_(ツ)_/¯
+                    // TODO: figure out the actual behavior
+                    Ok(Value::Bool(false))
                 }
             }
         }
@@ -122,11 +138,70 @@ impl Expression {
                     }
                 }
             }
+            Expression::Case(cases, otherwise) => {
+                let (_, result) = cases.first().expect("Empty case-when");
+                let result_type = result.result_type(schema)?;
+                for (c, r) in cases {
+                    let c_type = c.result_type(schema)?;
+                    let r_type = r.result_type(schema)?;
+
+                    if !c_type.convertable_to(Type::Bool) {
+                        return Err(format!(
+                            "Cannot convert condition of type {} to bool (CASE-WHEN)",
+                            c_type
+                        )
+                        .into());
+                    }
+
+                    if !r_type.convertable_to(result_type) {
+                        return Err(format!(
+                            "Cannot convert result of type {} to {} (CASE-WHEN)",
+                            r_type, result_type
+                        )
+                        .into());
+                    }
+                }
+
+                if let Some(otherwise) = otherwise {
+                    let t = otherwise.result_type(schema)?;
+
+                    if !t.convertable_to(result_type) {
+                        return Err(format!(
+                            "Cannot convert result of type {} to {} (CASE-WHEN)",
+                            t, result_type
+                        )
+                        .into());
+                    }
+                }
+
+                Ok(result_type)
+            }
         }
     }
 
     pub fn parse(expr: Expr, schema: &Schema) -> Result<Self> {
         match expr {
+            Expr::Case {
+                operand: None,
+                conditions,
+                results,
+                else_result,
+            } => {
+                assert!(conditions.len() == results.len());
+                let mut cases = Vec::with_capacity(conditions.len());
+
+                for (condition, result) in conditions.into_iter().zip(results) {
+                    let c = Expression::parse(condition, schema)?;
+                    let r = Expression::parse(result, schema)?;
+                    cases.push((c, r));
+                }
+
+                let otherwise = else_result
+                    .map(|expr| Expression::parse(*expr, schema))
+                    .transpose()?
+                    .map(Box::new);
+                Ok(Expression::Case(cases, otherwise))
+            }
             Expr::BinaryOp { left, op, right } => {
                 let left = Expression::parse(*left, schema)?;
                 let right = Expression::parse(*right, schema)?;

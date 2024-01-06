@@ -234,7 +234,11 @@ impl Engine {
         let transaction = self.db.transaction();
         let table = self.get_table(table, &cf, &transaction)?;
         let schema = table.schema();
-        let row = reorder(schema, columns, row)?;
+        let row = if columns.is_empty() {
+            row
+        } else {
+            reorder(schema, columns, row)?
+        };
         schema.check(&row)?;
         let key = table.get_key(&row);
         if transaction.get_for_update_cf(&cf, &key, true)?.is_some() {

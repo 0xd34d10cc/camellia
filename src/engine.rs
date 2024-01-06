@@ -4,10 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 use rocksdb::{IteratorMode, Options, Transaction};
-use sqlparser::ast::{
-    ColumnDef, Expr, GroupByExpr, HiveDistributionStyle, HiveFormat, ObjectName, ObjectType,
-    OrderByExpr, Query, Select, SetExpr, Statement, TableFactor, TableWithJoins, Values,
-};
+use sqlparser::ast;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
@@ -60,7 +57,7 @@ impl Engine {
         self.run(program)
     }
 
-    pub fn run(&self, program: Vec<Statement>) -> Result<Output> {
+    pub fn run(&self, program: Vec<ast::Statement>) -> Result<Output> {
         if program.len() != 1 {
             return Err("Cannot run more than one statement at time".into());
         }
@@ -72,9 +69,9 @@ impl Engine {
         self.execute(statement)
     }
 
-    fn execute(&self, statement: Statement) -> Result<Output> {
+    fn execute(&self, statement: ast::Statement) -> Result<Output> {
         match statement {
-            Statement::CreateTable {
+            ast::Statement::CreateTable {
                 name,
                 columns,
                 auto_increment_offset: None,
@@ -85,9 +82,9 @@ impl Engine {
                 if_not_exists: false,
                 transient: false,
                 constraints,
-                hive_distribution: HiveDistributionStyle::NONE,
+                hive_distribution: ast::HiveDistributionStyle::NONE,
                 hive_formats:
-                    Some(HiveFormat {
+                    Some(ast::HiveFormat {
                         row_format: None,
                         storage: None,
                         location: None,
@@ -115,8 +112,8 @@ impl Engine {
                 self.create(name, columns)?;
                 Ok(Output::Affected(0))
             }
-            Statement::Drop {
-                object_type: ObjectType::Table,
+            ast::Statement::Drop {
+                object_type: ast::ObjectType::Table,
                 if_exists: false,
                 names,
                 cascade: false,
@@ -128,11 +125,11 @@ impl Engine {
                 self.drop(name)?;
                 Ok(Output::Affected(0))
             }
-            Statement::Query(query) => {
+            ast::Statement::Query(query) => {
                 let rows = self.query(*query)?;
                 Ok(rows)
             }
-            Statement::Insert {
+            ast::Statement::Insert {
                 or: None,
                 ignore: false,
                 into: true,
@@ -145,17 +142,17 @@ impl Engine {
                 table: false,
                 on: None,
                 returning: None,
-            } if columns.is_empty() && after_columns.is_empty() => {
-                self.insert(table_name, *source)?;
+            } if after_columns.is_empty() => {
+                self.insert(table_name, columns, *source)?;
                 Ok(Output::Affected(1))
             }
             _ => Err("Not supported".into()),
         }
     }
 
-    fn query(&self, query: Query) -> Result<Output> {
+    fn query(&self, query: ast::Query) -> Result<Output> {
         let (query, order_by) = match query {
-            Query {
+            ast::Query {
                 with: None,
                 body,
                 order_by,
@@ -170,12 +167,12 @@ impl Engine {
         };
 
         match query {
-            SetExpr::Select(select) => self.select(*select, order_by),
+            ast::SetExpr::Select(select) => self.select(*select, order_by),
             _ => Err("Unsupported query kind".into()),
         }
     }
 
-    fn create(&self, name: ObjectName, columns: Vec<ColumnDef>) -> Result<()> {
+    fn create(&self, name: ast::ObjectName, columns: Vec<ast::ColumnDef>) -> Result<()> {
         let table = name.to_string();
         for column in &columns {
             crate::types::type_of(column)?;
@@ -196,7 +193,7 @@ impl Engine {
         Ok(())
     }
 
-    fn drop(&self, name: ObjectName) -> Result<()> {
+    fn drop(&self, name: ast::ObjectName) -> Result<()> {
         let table = name.to_string();
         let transaction = self.db.transaction();
         transaction.delete(&table)?;
@@ -205,9 +202,14 @@ impl Engine {
         Ok(())
     }
 
-    fn insert(&self, name: ObjectName, source: Query) -> Result<()> {
+    fn insert(
+        &self,
+        name: ast::ObjectName,
+        columns: Vec<ast::Ident>,
+        source: ast::Query,
+    ) -> Result<()> {
         let expr = match source {
-            Query {
+            ast::Query {
                 with: None,
                 body,
                 order_by,
@@ -222,7 +224,7 @@ impl Engine {
         };
 
         let row = match expr {
-            SetExpr::Values(values) => create_row(values)?,
+            ast::SetExpr::Values(values) => create_row(values)?,
             _ => return Err("Unsupported insert expression kind".into()),
         };
 
@@ -231,7 +233,9 @@ impl Engine {
 
         let transaction = self.db.transaction();
         let table = self.get_table(table, &cf, &transaction)?;
-        table.schema().check(&row)?;
+        let schema = table.schema();
+        let row = reorder(schema, columns, row)?;
+        schema.check(&row)?;
         let key = table.get_key(&row);
         if transaction.get_for_update_cf(&cf, &key, true)?.is_some() {
             return Err("Entry with such primary key already exist".into());
@@ -244,9 +248,9 @@ impl Engine {
         Ok(())
     }
 
-    fn select(&self, query: Select, order_by: Vec<OrderByExpr>) -> Result<Output> {
+    fn select(&self, query: ast::Select, order_by: Vec<ast::OrderByExpr>) -> Result<Output> {
         let (table, expressions, selection) = match query {
-            Select {
+            ast::Select {
                 distinct: None,
                 top: None,
                 projection,
@@ -254,7 +258,7 @@ impl Engine {
                 from,
                 lateral_views,
                 selection,
-                group_by: GroupByExpr::Expressions(group_by_exprs),
+                group_by: ast::GroupByExpr::Expressions(group_by_exprs),
                 cluster_by,
                 distribute_by,
                 sort_by,
@@ -270,9 +274,9 @@ impl Engine {
                 && named_window.is_empty() =>
             {
                 match from.into_iter().next().unwrap() {
-                    TableWithJoins {
+                    ast::TableWithJoins {
                         relation:
-                            TableFactor::Table {
+                            ast::TableFactor::Table {
                                 name,
                                 alias: None,
                                 args: None,
@@ -373,7 +377,7 @@ impl Engine {
     }
 }
 
-fn create_row(values: Values) -> Result<Row> {
+fn create_row(values: ast::Values) -> Result<Row> {
     if values.explicit_row {
         return Err("Explicit row is not supported".into());
     }
@@ -386,7 +390,7 @@ fn create_row(values: Values) -> Result<Row> {
     let source = values.rows.into_iter().next().unwrap();
     for column in source {
         let value = match column {
-            Expr::Value(value) => Value::try_from(value)?,
+            ast::Expr::Value(value) => Value::try_from(value)?,
             _ => return Err("Unsupported expression type (create_row)".into()),
         };
 
@@ -394,4 +398,21 @@ fn create_row(values: Values) -> Result<Row> {
     }
 
     Ok(Row::from(row))
+}
+
+fn reorder(schema: &Schema, columns: Vec<ast::Ident>, row: Row) -> Result<Row> {
+    if columns.len() != row.len() {
+        return Err("Number of values does not match number of columns".into());
+    }
+
+    let mut values = Vec::with_capacity(row.len());
+    for column in schema.columns() {
+        let index = columns
+            .iter()
+            .position(|c| c.value == column.name)
+            .ok_or_else(|| format!("Unknown column {}", column.name))?;
+        values.push(row.get(index).clone());
+    }
+
+    Ok(Row::from(values))
 }

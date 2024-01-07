@@ -1,3 +1,18 @@
+query I
+select 2 + 2
+----
+4
+
+query I
+select 2 + 2 * 2
+----
+6
+
+query I
+select (2 + 2) * 2
+----
+8
+
 statement ok
 create table t(a int, b int);
 

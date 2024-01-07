@@ -9,7 +9,7 @@ use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
 use crate::expression::Expression;
-use crate::ops::{self, Eval, Filter, FullScan, Operation, Sort};
+use crate::ops::{self, Empty as EmptySource, Eval, Filter, FullScan, Operation, Sort};
 use crate::schema::Schema;
 use crate::table::Table;
 use crate::types::{Database, Result, Row, RowSet, Value};
@@ -270,7 +270,7 @@ impl Engine {
                 having: None,
                 named_window,
                 qualify: None,
-            } if from.len() == 1
+            } if from.len() <= 1
                 && lateral_views.is_empty()
                 && group_by_exprs.is_empty()
                 && cluster_by.is_empty()
@@ -278,8 +278,8 @@ impl Engine {
                 && sort_by.is_empty()
                 && named_window.is_empty() =>
             {
-                match from.into_iter().next().unwrap() {
-                    ast::TableWithJoins {
+                let name = match from.into_iter().next() {
+                    Some(ast::TableWithJoins {
                         relation:
                             ast::TableFactor::Table {
                                 name,
@@ -290,22 +290,31 @@ impl Engine {
                                 partitions,
                             },
                         joins,
-                    } if joins.is_empty() && with_hints.is_empty() && partitions.is_empty() => {
-                        (name.to_string(), projection, selection)
+                    }) if joins.is_empty() && with_hints.is_empty() && partitions.is_empty() => {
+                        Some(name.to_string())
                     }
+                    None => None,
                     _ => return Err("Unsupported select source".into()),
-                }
+                };
+
+                (name, projection, selection)
             }
             _ => return Err("Unsupported select kind".into()),
         };
 
-        let cf = self.db.cf_handle(&table).ok_or("No such table")?;
         let transaction = self.db.transaction();
-        let table = self.get_table(table, &cf, &transaction)?;
-        let schema = table.schema().clone();
+        let mut source = match table {
+            Some(table) => {
+                let cf = self.db.cf_handle(&table).ok_or("No such table")?;
+                let table = self.get_table(table, &cf, &transaction)?;
+                let schema = table.schema().clone();
 
-        let iter = transaction.iterator_cf(&cf, IteratorMode::Start);
-        let mut source = Box::new(FullScan::new(schema, iter)?) as Box<dyn Operation>;
+                let iter = transaction.iterator_cf(&cf, IteratorMode::Start);
+                Box::new(FullScan::new(schema, iter)?) as Box<dyn Operation>
+            }
+            None => Box::new(EmptySource::new()) as Box<dyn Operation>,
+        };
+
         if let Some(selection) = selection {
             let filter = Filter::new(selection, source)?;
             source = Box::new(filter)

@@ -5,11 +5,13 @@ mod filter;
 mod fullscan;
 mod eval;
 mod sort;
+mod empty;
 
 pub use filter::Filter;
 pub use fullscan::FullScan;
 pub use eval::Eval;
 pub use sort::Sort;
+pub use empty::Empty;
 
 pub enum Output {
     Batch(Vec<Row>),

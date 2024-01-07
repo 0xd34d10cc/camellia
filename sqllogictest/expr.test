@@ -40,6 +40,18 @@ select a*(b+a) from t;
 10
 36
 
+query I
+select case when a > 3 then 1 else 2 end from t;
+----
+2
+1
+
+query I
+select case when a > 3 then 321 when b == 3 then 123 end from t;
+----
+123
+321
+
 # TODO: make it work, currently panics
 # division by 0
 # statement error

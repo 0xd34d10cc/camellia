@@ -1,6 +1,6 @@
 use core::fmt;
 
-use sqlparser::ast::{BinaryOperator, Expr, Ident};
+use sqlparser::ast;
 
 use crate::schema::{Schema, Type};
 use crate::types::{Result, Row, Value};
@@ -42,11 +42,31 @@ impl fmt::Display for Op {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum UnaryOp {
+    Not,
+    Plus,
+    Minus,
+}
+
+impl fmt::Display for UnaryOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            UnaryOp::Not => "NOT",
+            UnaryOp::Plus => "+",
+            UnaryOp::Minus => "-",
+        };
+
+        f.write_str(s)
+    }
+}
+
 #[derive(Clone)]
 pub enum Expression {
     Field(usize),
     Const(Value),
 
+    UnaryOp(UnaryOp, Box<Expression>),
     BinOp(Box<Expression>, Op, Box<Expression>),
     Case(Vec<(Expression, Expression)>, Option<Box<Expression>>),
 }
@@ -56,6 +76,25 @@ impl Expression {
         match self {
             Expression::Field(index) => Ok(row.get(*index).clone()),
             Expression::Const(val) => Ok(val.clone()),
+            Expression::UnaryOp(op, expr) => {
+                let val = expr.eval(row)?;
+                match op {
+                    UnaryOp::Not => {
+                        let val = val
+                            .to_bool()
+                            .ok_or("Cannot convert to BOOL for NOT operation")?;
+                        Ok(Value::Bool(!val))
+                    }
+                    UnaryOp::Plus => {
+                        // does not do anything
+                        Ok(val)
+                    }
+                    UnaryOp::Minus => {
+                        let val = val.to_int().ok_or("Cannot convert to INT for unary '-'")?;
+                        Ok(Value::Int(-val))
+                    }
+                }
+            }
             Expression::BinOp(left, op, right) => {
                 let left = left.eval(row)?;
                 let right = right.eval(row)?;
@@ -102,6 +141,32 @@ impl Expression {
                     .get(*i)
                     .ok_or("Reference to unknown column")?;
                 Ok(column.type_)
+            }
+            Expression::UnaryOp(op, expr) => {
+                let t = expr.result_type(schema)?;
+                match op {
+                    UnaryOp::Not => {
+                        if !t.convertable_to(Type::Bool) {
+                            return Err(format!(
+                                "Invalid NOT: cannot be applied to expression of type {t}"
+                            )
+                            .into());
+                        }
+
+                        Ok(Type::Bool)
+                    }
+                    UnaryOp::Plus => Ok(t),
+                    UnaryOp::Minus => {
+                        if !t.convertable_to(Type::Integer) {
+                            return Err(format!(
+                                "Invalid unary '-': cannot be applied to expression of type {t}"
+                            )
+                            .into());
+                        }
+
+                        Ok(Type::Integer)
+                    }
+                }
             }
             Expression::BinOp(left, op, right) => {
                 let left = left.result_type(schema)?;
@@ -179,9 +244,9 @@ impl Expression {
         }
     }
 
-    pub fn parse(expr: Expr, schema: &Schema) -> Result<Self> {
+    pub fn parse(expr: ast::Expr, schema: &Schema) -> Result<Self> {
         match expr {
-            Expr::Case {
+            ast::Expr::Case {
                 operand: None,
                 conditions,
                 results,
@@ -202,23 +267,46 @@ impl Expression {
                     .map(Box::new);
                 Ok(Expression::Case(cases, otherwise))
             }
-            Expr::BinaryOp { left, op, right } => {
+            ast::Expr::UnaryOp { op, expr } => {
+                let e = Expression::parse(*expr, schema)?;
+                let op = match op {
+                    ast::UnaryOperator::Not => UnaryOp::Not,
+                    ast::UnaryOperator::Plus => UnaryOp::Plus,
+                    ast::UnaryOperator::Minus => UnaryOp::Minus,
+                    _ => return Err(format!("Unsupported unary operator: {:?}", op).into()),
+                };
+
+                // Do a bit of const folding
+                let e = match (op, e) {
+                    (UnaryOp::Not, Expression::Const(Value::Bool(v))) => {
+                        Expression::Const(Value::Bool(!v))
+                    }
+                    (UnaryOp::Plus, Expression::Const(v)) => Expression::Const(v),
+                    (UnaryOp::Minus, Expression::Const(Value::Int(v))) => {
+                        Expression::Const(Value::Int(-v))
+                    }
+                    (op, e) => Expression::UnaryOp(op, Box::new(e)),
+                };
+
+                Ok(e)
+            }
+            ast::Expr::BinaryOp { left, op, right } => {
                 let left = Expression::parse(*left, schema)?;
                 let right = Expression::parse(*right, schema)?;
                 let op = match op {
-                    BinaryOperator::Plus => Op::Add,
-                    BinaryOperator::Minus => Op::Sub,
-                    BinaryOperator::Multiply => Op::Mul,
-                    BinaryOperator::Divide => Op::Div,
+                    ast::BinaryOperator::Plus => Op::Add,
+                    ast::BinaryOperator::Minus => Op::Sub,
+                    ast::BinaryOperator::Multiply => Op::Mul,
+                    ast::BinaryOperator::Divide => Op::Div,
 
-                    BinaryOperator::And => Op::And,
-                    BinaryOperator::Or => Op::Or,
+                    ast::BinaryOperator::And => Op::And,
+                    ast::BinaryOperator::Or => Op::Or,
 
-                    BinaryOperator::Eq => Op::Equal,
-                    BinaryOperator::Lt => Op::Less,
-                    BinaryOperator::LtEq => Op::LessOrEqual,
-                    BinaryOperator::Gt => Op::Greater,
-                    BinaryOperator::GtEq => Op::GreaterOrEqual,
+                    ast::BinaryOperator::Eq => Op::Equal,
+                    ast::BinaryOperator::Lt => Op::Less,
+                    ast::BinaryOperator::LtEq => Op::LessOrEqual,
+                    ast::BinaryOperator::Gt => Op::Greater,
+                    ast::BinaryOperator::GtEq => Op::GreaterOrEqual,
 
                     op => return Err(format!("Unsupported binary operation: {:?}", op).into()),
                 };
@@ -226,8 +314,8 @@ impl Expression {
                 // TODO: typecheck?
                 Ok(Expression::BinOp(Box::new(left), op, Box::new(right)))
             }
-            Expr::Nested(e) => Expression::parse(*e, schema),
-            Expr::Identifier(Ident {
+            ast::Expr::Nested(e) => Expression::parse(*e, schema),
+            ast::Expr::Identifier(ast::Ident {
                 value,
                 quote_style: None,
             }) => {
@@ -237,7 +325,7 @@ impl Expression {
                     .ok_or_else(|| format!("No such column: {}", value))?;
                 Ok(Expression::Field(index))
             }
-            Expr::Value(val) => {
+            ast::Expr::Value(val) => {
                 let val = Value::try_from(val)?;
                 Ok(Expression::Const(val))
             }

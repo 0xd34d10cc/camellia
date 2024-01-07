@@ -13,6 +13,21 @@ select (2 + 2) * 2
 ----
 8
 
+query I
+select -(2 + 2)
+----
+-4
+
+query I
+select 2 + -2
+----
+0
+
+query I
+select (not (true and false))+1-1
+----
+1
+
 statement ok
 create table t(a int, b int);
 

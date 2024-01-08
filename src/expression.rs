@@ -16,6 +16,7 @@ pub enum Op {
     Or,
 
     Equal,
+    NotEqual,
     Less,
     LessOrEqual,
     Greater,
@@ -32,6 +33,7 @@ impl fmt::Display for Op {
             Op::And => "AND",
             Op::Or => "OR",
             Op::Equal => "=",
+            Op::NotEqual => "!=",
             Op::Less => "<",
             Op::LessOrEqual => "<=",
             Op::Greater => ">",
@@ -109,6 +111,7 @@ impl Expression {
                     Op::Or => left.or(right),
 
                     Op::Equal => Ok(Value::Bool(left == right)),
+                    Op::NotEqual => Ok(Value::Bool(left != right)),
                     Op::Less => Ok(Value::Bool(left < right)),
                     Op::LessOrEqual => Ok(Value::Bool(left <= right)),
                     Op::Greater => Ok(Value::Bool(left > right)),
@@ -203,7 +206,12 @@ impl Expression {
 
                         Ok(Type::Bool)
                     }
-                    Op::Equal | Op::Greater | Op::GreaterOrEqual | Op::Less | Op::LessOrEqual => {
+                    Op::Equal
+                    | Op::NotEqual
+                    | Op::Greater
+                    | Op::GreaterOrEqual
+                    | Op::Less
+                    | Op::LessOrEqual => {
                         if left != right {
                             return Err(format!("Attempt to compare values of different types ({left} and {right}) with {op}").into());
                         }
@@ -357,6 +365,7 @@ impl Expression {
                     ast::BinaryOperator::Or => Op::Or,
 
                     ast::BinaryOperator::Eq => Op::Equal,
+                    ast::BinaryOperator::NotEq => Op::NotEqual,
                     ast::BinaryOperator::Lt => Op::Less,
                     ast::BinaryOperator::LtEq => Op::LessOrEqual,
                     ast::BinaryOperator::Gt => Op::Greater,

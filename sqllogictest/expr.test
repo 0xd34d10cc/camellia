@@ -28,6 +28,31 @@ select (not (true and false))+1-1
 ----
 1
 
+query I
+select abs(-2)
+----
+2
+
+query I
+select abs(42)
+----
+42
+
+query I
+select abs(42 - 62)
+----
+20
+
+query I
+select abs(true or false)
+----
+1
+
+query I
+select abs(true and false)
+----
+0
+
 statement ok
 create table t(a int, b int);
 

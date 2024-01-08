@@ -1,6 +1,6 @@
 use core::fmt;
 
-use sqlparser::ast;
+use sqlparser::ast::{self, Function};
 
 use crate::schema::{Schema, Type};
 use crate::types::{Result, Row, Value};
@@ -66,6 +66,7 @@ pub enum Expression {
     Field(usize),
     Const(Value),
 
+    Abs(Box<Expression>),
     UnaryOp(UnaryOp, Box<Expression>),
     BinOp(Box<Expression>, Op, Box<Expression>),
     Case(Vec<(Expression, Expression)>, Option<Box<Expression>>),
@@ -128,6 +129,14 @@ impl Expression {
                     // TODO: figure out the actual behavior
                     Ok(Value::Bool(false))
                 }
+            }
+            Expression::Abs(arg) => {
+                let val = arg
+                    .eval(row)?
+                    .to_int()
+                    .ok_or("Cannot convert 'abs' arg to integer")?;
+
+                Ok(Value::Int(val.abs()))
             }
         }
     }
@@ -203,6 +212,18 @@ impl Expression {
                     }
                 }
             }
+            Expression::Abs(arg) => {
+                let t = arg.result_type(schema)?;
+                if !t.convertable_to(Type::Integer) {
+                    return Err(format!(
+                        "Cannot convert argument of 'abs' (type {}) to integer",
+                        t
+                    )
+                    .into());
+                }
+
+                Ok(Type::Integer)
+            }
             Expression::Case(cases, otherwise) => {
                 let (_, result) = cases.first().expect("Empty case-when");
                 let result_type = result.result_type(schema)?;
@@ -246,6 +267,39 @@ impl Expression {
 
     pub fn parse(expr: ast::Expr, schema: &Schema) -> Result<Self> {
         match expr {
+            ast::Expr::Function(Function {
+                name,
+                args,
+                filter: None,
+                null_treatment: None,
+                over: None,
+                distinct: false,
+                special: false,
+                order_by,
+            }) if order_by.is_empty() => {
+                let name = name.to_string().to_ascii_lowercase();
+                if name != "abs" {
+                    return Err(format!("Unknown function: {}", name).into());
+                }
+
+                if args.len() != 1 {
+                    return Err(format!("Invalid number of arguments for {} function", name).into());
+                }
+
+                let arg = match args.into_iter().next().unwrap() {
+                    ast::FunctionArg::Unnamed(arg) => {
+                        if let ast::FunctionArgExpr::Expr(e) = arg {
+                            e
+                        } else {
+                            return Err("Unsupported function arg expression kind".into());
+                        }
+                    }
+                    _ => return Err("Named function args are not supported".into()),
+                };
+
+                let e = Expression::parse(arg, schema)?;
+                Ok(Expression::Abs(Box::new(e)))
+            }
             ast::Expr::Case {
                 operand: None,
                 conditions,

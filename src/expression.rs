@@ -128,9 +128,7 @@ impl Expression {
                 if let Some(otherwise) = otherwise {
                     otherwise.eval(row)
                 } else {
-                    // ¯\_(ツ)_/¯
-                    // TODO: figure out the actual behavior
-                    Ok(Value::Bool(false))
+                    Ok(Value::Null)
                 }
             }
             Expression::Abs(arg) => {
@@ -368,7 +366,6 @@ impl Expression {
                     op => return Err(format!("Unsupported binary operation: {:?}", op).into()),
                 };
 
-                // TODO: typecheck?
                 Ok(Expression::BinOp(Box::new(left), op, Box::new(right)))
             }
             ast::Expr::Nested(e) => Expression::parse(*e, schema),

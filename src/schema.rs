@@ -48,7 +48,7 @@ impl Schema {
 
         for (column, value) in self.columns.iter().zip(row.values()) {
             let value_type = value.type_();
-            if value_type != column.type_ {
+            if value_type != column.type_ && value_type != Type::Null {
                 return Err(format!(
                     "{} field type does not match: expected {} but got {}",
                     column.name, column.type_, value_type
@@ -79,6 +79,7 @@ impl TryFrom<ast::ColumnDef> for Column {
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum Type {
+    Null,
     Bool,
     Integer,
     Text,
@@ -91,6 +92,7 @@ impl Type {
         }
 
         match self {
+            Type::Null => type_ == Type::Null,
             Type::Bool => type_ == Type::Integer,
             Type::Integer => type_ == Type::Bool,
             Type::Text => false,
@@ -100,11 +102,14 @@ impl Type {
 
 impl Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Type::Bool => write!(f, "bool"),
-            Type::Integer => write!(f, "int"),
-            Type::Text => write!(f, "text"),
-        }
+        let s = match self {
+            Type::Null => "null",
+            Type::Bool => "bool",
+            Type::Integer => "int",
+            Type::Text => "text",
+        };
+
+        f.write_str(s)
     }
 }
 

@@ -69,6 +69,7 @@ impl Display for RowSet {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Value {
+    Null,
     Bool(bool),
     Int(i64),
     String(String),
@@ -77,6 +78,7 @@ pub enum Value {
 impl Value {
     pub fn try_from(value: ast::Value) -> Result<Value> {
         let value = match value {
+            ast::Value::Null => Value::Null,
             ast::Value::Boolean(val) => Value::Bool(val),
             ast::Value::Number(number, false) => Value::Int(number.parse::<i64>()?),
             ast::Value::SingleQuotedString(string) => Value::String(string),
@@ -88,6 +90,7 @@ impl Value {
 
     pub fn type_(&self) -> Type {
         match self {
+            Value::Null => Type::Null,
             Value::Bool(_) => Type::Bool,
             Value::Int(_) => Type::Integer,
             Value::String(_) => Type::Text,
@@ -154,6 +157,7 @@ impl Value {
 impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Value::Null => write!(f, "null"),
             Value::Bool(val) => write!(f, "{}", val),
             Value::Int(val) => write!(f, "{}", val),
             Value::String(val) => write!(f, "{}", val),

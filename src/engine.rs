@@ -200,6 +200,7 @@ impl Engine {
         transaction.delete(&table)?;
         transaction.commit()?;
         self.db.drop_cf(&table)?;
+        self.tables.write().unwrap().remove(&table);
         Ok(())
     }
 

@@ -26,6 +26,7 @@ impl Table {
                 key.extend_from_slice(&bytes);
             }
             Some(index) => match row.get(index) {
+                Value::Null => { /* leave key empty */ },
                 Value::Bool(val) => key.push(*val as u8),
                 Value::Int(val) => key.extend_from_slice(&val.to_be_bytes()),
                 Value::String(val) => key.extend_from_slice(val.as_bytes()),

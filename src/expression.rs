@@ -295,14 +295,8 @@ impl Expression {
                 }
 
                 let arg = match args.into_iter().next().unwrap() {
-                    ast::FunctionArg::Unnamed(arg) => {
-                        if let ast::FunctionArgExpr::Expr(e) = arg {
-                            e
-                        } else {
-                            return Err("Unsupported function arg expression kind".into());
-                        }
-                    }
-                    _ => return Err("Named function args are not supported".into()),
+                    ast::FunctionArg::Unnamed(ast::FunctionArgExpr::Expr(e)) => e,
+                    _ => return Err("Unsupported function arg kind".into()),
                 };
 
                 let e = Expression::parse(arg, schema)?;

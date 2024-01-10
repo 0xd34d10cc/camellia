@@ -62,6 +62,7 @@ impl sqllogictest::DB for Database {
 
 fn type_of(column: &Column) -> DefaultColumnType {
     match column.type_ {
+        Type::Null => DefaultColumnType::Any,
         Type::Integer => DefaultColumnType::Integer,
         Type::Text => DefaultColumnType::Text,
         Type::Bool => DefaultColumnType::Any,

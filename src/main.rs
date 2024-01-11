@@ -37,7 +37,7 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         match engine.run_sql(line) {
             Ok(Output::Affected(n)) => {
                 if n != 0 {
-                    println!("{} rows affected", n);
+                    println!("{} row(s) affected", n);
                 }
             }
             Ok(Output::Rows(rowset)) => {

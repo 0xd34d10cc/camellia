@@ -5,17 +5,11 @@ statement ok
 insert into t values(1,4,'foo')
 
 statement ok
-insert into t values(2,3,'bar')
+insert into t values(2,3,'bar'), (3,4,'baz'), (4,3,'baz')
 
-statement ok
-insert into t values(3,4,'baz')
-
-statement ok
-insert into t values(4,3,'baz')
-
-# primary key constraint violation
+# primary key constraint violation (v1=3)
 statement error
-insert into t values(3, 5, 'kek')
+insert into t values(5, 5, 'should not be present'), (3, 5, 'kek')
 
 query IIT
 select * from t

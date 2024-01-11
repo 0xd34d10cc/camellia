@@ -225,7 +225,7 @@ impl Engine {
             _ => return Err("Unsupported insert statement kind".into()),
         };
 
-        let row = match expr {
+        let rows = match expr {
             ast::SetExpr::Values(values) => create_row(values)?,
             _ => return Err("Unsupported insert expression kind".into()),
         };
@@ -236,20 +236,27 @@ impl Engine {
         let transaction = self.db.transaction();
         let table = self.get_table(table, &cf, &transaction)?;
         let schema = table.schema();
-        let row = if columns.is_empty() {
-            row
+        let rows = if columns.is_empty() {
+            rows
         } else {
-            reorder(schema, columns, row)?
+            reorder(schema, columns, rows)?
         };
-        schema.check(&row)?;
-        let key = table.get_key(&row);
-        if transaction.get_for_update_cf(&cf, &key, true)?.is_some() {
-            return Err("Entry with such primary key already exist".into());
+
+        for row in &rows {
+            schema.check(row)?;
         }
 
-        let mut value = Vec::new();
-        row.serialize(&mut value)?;
-        transaction.put_cf(&cf, &key, value)?;
+        for row in rows {
+            let key = table.get_key(&row);
+            if transaction.get_for_update_cf(&cf, &key, true)?.is_some() {
+                return Err("Entry with such primary key already exist".into());
+            }
+
+            let mut value = Vec::new();
+            row.serialize(&mut value)?;
+            transaction.put_cf(&cf, &key, value)?;
+        }
+
         transaction.commit()?;
         Ok(())
     }
@@ -394,44 +401,48 @@ impl Engine {
     }
 }
 
-fn create_row(values: ast::Values) -> Result<Row> {
+fn create_row(values: ast::Values) -> Result<Vec<Row>> {
     if values.explicit_row {
         return Err("Explicit row is not supported".into());
     }
 
-    if values.rows.len() != 1 {
-        return Err("Expected exactly one row".into());
+    let mut rows = Vec::new();
+    for tuple in values.rows {
+        let mut row = Vec::new();
+        for column in tuple {
+            let value = match column {
+                ast::Expr::Value(value) => Value::try_from(value)?,
+                _ => return Err("Unsupported expression type (create_row)".into()),
+            };
+
+            row.push(value)
+        }
+
+        rows.push(Row::from(row))
     }
 
-    let mut row = Vec::new();
-    let source = values.rows.into_iter().next().unwrap();
-    for column in source {
-        let value = match column {
-            ast::Expr::Value(value) => Value::try_from(value)?,
-            _ => return Err("Unsupported expression type (create_row)".into()),
-        };
-
-        row.push(value)
-    }
-
-    Ok(Row::from(row))
+    Ok(rows)
 }
 
-fn reorder(schema: &Schema, columns: Vec<ast::Ident>, row: Row) -> Result<Row> {
-    if columns.len() != row.len() {
-        return Err("Number of values does not match number of columns".into());
+fn reorder(schema: &Schema, columns: Vec<ast::Ident>, mut rows: Vec<Row>) -> Result<Vec<Row>> {
+    for row in rows.iter_mut() {
+        if columns.len() != row.len() {
+            return Err("Number of values does not match number of columns".into());
+        }
+
+        let mut values = Vec::with_capacity(row.len());
+        for column in schema.columns() {
+            let index = columns
+                .iter()
+                .position(|c| c.value == column.name)
+                .ok_or_else(|| format!("Unknown column {}", column.name))?;
+            values.push(row.get(index).clone());
+        }
+
+        *row = Row::from(values)
     }
 
-    let mut values = Vec::with_capacity(row.len());
-    for column in schema.columns() {
-        let index = columns
-            .iter()
-            .position(|c| c.value == column.name)
-            .ok_or_else(|| format!("Unknown column {}", column.name))?;
-        values.push(row.get(index).clone());
-    }
-
-    Ok(Row::from(values))
+    Ok(rows)
 }
 
 fn expand_select(

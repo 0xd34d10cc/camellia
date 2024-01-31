@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use rocksdb::{DBIteratorWithThreadMode, Transaction};
 
 use crate::schema::Schema;
@@ -36,6 +38,9 @@ impl<'txn> Operation for FullScan<'txn> {
                     let row: Row = Row::deserialize(&value, &self.schema)?;
                     batch.push(row);
                     if batch.len() >= BATCH_SIZE {
+                        minitrace::Event::add_to_local_parent("batch", || {
+                            [(Cow::Borrowed("size"), Cow::Owned(format!("{}", batch.len())))]
+                        });
                         return Ok(Output::Batch(batch));
                     }
                 }
@@ -44,6 +49,9 @@ impl<'txn> Operation for FullScan<'txn> {
                     if batch.is_empty() {
                         return Ok(Output::Finished);
                     } else {
+                        minitrace::Event::add_to_local_parent("batch", || {
+                            [(Cow::Borrowed("size"), Cow::Owned(format!("{}", batch.len())))]
+                        });
                         return Ok(Output::Batch(batch));
                     }
                 }

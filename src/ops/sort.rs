@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::BinaryHeap;
 
 use sqlparser::ast;
@@ -191,6 +192,9 @@ impl<'txn> Sort<'txn> {
                 Some(row) => {
                     chunk.push(row);
                     if chunk.len() >= BATCH_SIZE {
+                        minitrace::Event::add_to_local_parent("batch", || {
+                            [(Cow::Borrowed("size"), Cow::Owned(format!("{}", chunk.len())))]
+                        });
                         return Ok(Output::Batch(chunk));
                     }
                 }
@@ -198,6 +202,9 @@ impl<'txn> Sort<'txn> {
                     if chunk.is_empty() {
                         return Ok(Output::Finished);
                     } else {
+                        minitrace::Event::add_to_local_parent("batch", || {
+                            [(Cow::Borrowed("size"), Cow::Owned(format!("{}", chunk.len())))]
+                        });
                         return Ok(Output::Batch(chunk));
                     }
                 }

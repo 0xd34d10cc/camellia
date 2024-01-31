@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use sqlparser::ast::Expr;
 
 use super::{Operation, Output};
@@ -30,6 +32,9 @@ impl<'txn> Operation for Filter<'txn> {
             Output::Batch(mut batch) => {
                 // TODO: handle errors
                 batch.retain(|row| self.filter.eval(row).unwrap().to_bool().unwrap());
+                minitrace::Event::add_to_local_parent("batch", || {
+                    [(Cow::Borrowed("size"), Cow::Owned(format!("{}", batch.len())))]
+                });
                 Ok(Output::Batch(batch))
             }
             Output::Finished => Ok(Output::Finished),

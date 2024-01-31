@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::schema::Schema;
 use crate::types::{Result, Row};
 
@@ -32,6 +34,9 @@ impl Operation for Empty {
             true => Ok(Output::Finished),
             false => {
                 let empty_row = Row::from(Vec::new());
+                minitrace::Event::add_to_local_parent("batch", || {
+                    [(Cow::Borrowed("size"), Cow::Borrowed("1"))]
+                });
                 Ok(Output::Batch(vec![empty_row]))
             }
         }

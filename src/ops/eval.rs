@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::expression::Expression;
 use crate::schema::Schema;
 use crate::types::{Result, Row};
@@ -49,6 +51,9 @@ impl<'txn> Operation for Eval<'txn> {
                     self.eval_on(row);
                 }
 
+                minitrace::Event::add_to_local_parent("batch", || {
+                    [(Cow::Borrowed("size"), Cow::Owned(format!("{}", rows.len())))]
+                });
                 Output::Batch(rows)
             }
         };

@@ -17,6 +17,12 @@ pub fn init(endpoint: String) -> Result<(), Box<dyn Error>> {
         return Err("Tracing already initialized".into());
     }
 
+    #[cfg(windows)]
+    unsafe {
+        // minitrace uses GetTickCount64 on windows and by default resolution is 15.6ms, which is not good enough
+        windows::Win32::Media::timeBeginPeriod(1);
+    }
+
     let config = TracingConfig::default();
     let opentelemetry_exporter = opentelemetry_otlp::new_exporter()
         .tonic()
@@ -47,6 +53,12 @@ pub fn init(endpoint: String) -> Result<(), Box<dyn Error>> {
 pub fn shutdown() {
     if !ENABLED.swap(false, Ordering::SeqCst) {
         return;
+    }
+
+    #[cfg(windows)]
+    unsafe {
+        // minitrace uses GetTickCount64 on windows and by default resolution is 15.6ms, which is not good enough
+        windows::Win32::Media::timeEndPeriod(1);
     }
 
     minitrace::flush();

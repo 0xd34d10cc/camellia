@@ -26,6 +26,7 @@ impl Operation for Empty {
         &self.schema
     }
 
+    #[minitrace::trace]
     fn poll(&mut self) -> Result<Output> {
         match std::mem::replace(&mut self.empty, true) {
             true => Ok(Output::Finished),

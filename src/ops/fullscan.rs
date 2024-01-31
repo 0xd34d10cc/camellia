@@ -25,6 +25,7 @@ impl<'txn> Operation for FullScan<'txn> {
         &self.schema
     }
 
+    #[minitrace::trace]
     fn poll(&mut self) -> Result<Output> {
         const BATCH_SIZE: usize = 1024;
 

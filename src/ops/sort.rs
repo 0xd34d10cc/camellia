@@ -86,6 +86,7 @@ impl<'txn> Sort<'txn> {
         Ok(Row::from(key))
     }
 
+    #[minitrace::trace]
     fn read(&mut self) -> Result<()> {
         loop {
             match self.inner.poll()? {
@@ -159,6 +160,7 @@ impl<'txn> Sort<'txn> {
         sorted
     }
 
+    #[minitrace::trace]
     fn merge(&mut self) -> Result<()> {
         if self.runs.len() <= 1 {
             return Ok(());
@@ -180,6 +182,7 @@ impl<'txn> Sort<'txn> {
         }
     }
 
+    #[minitrace::trace]
     fn poll_batch(&mut self) -> Result<Output> {
         const BATCH_SIZE: usize = 1024;
         let mut chunk = Vec::with_capacity(BATCH_SIZE);
@@ -208,6 +211,7 @@ impl<'txn> Operation for Sort<'txn> {
         self.inner.schema()
     }
 
+    #[minitrace::trace]
     fn poll(&mut self) -> Result<Output> {
         loop {
             match self.state {

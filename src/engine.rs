@@ -7,6 +7,7 @@ use rocksdb::{IteratorMode, Options, Transaction};
 use sqlparser::ast;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
+use minitrace::trace;
 
 use crate::expression::Expression;
 use crate::ops::{self, Empty as EmptySource, Eval, Filter, FullScan, Operation, Sort};
@@ -173,6 +174,7 @@ impl Engine {
         }
     }
 
+    #[trace]
     fn create(&self, name: ast::ObjectName, columns: Vec<ast::ColumnDef>) -> Result<()> {
         let table = name.to_string();
         for column in &columns {
@@ -194,6 +196,7 @@ impl Engine {
         Ok(())
     }
 
+    #[trace]
     fn drop(&self, name: ast::ObjectName) -> Result<()> {
         let table = name.to_string();
         let transaction = self.db.transaction();
@@ -204,6 +207,7 @@ impl Engine {
         Ok(())
     }
 
+    #[trace]
     fn insert(
         &self,
         name: ast::ObjectName,
@@ -261,6 +265,7 @@ impl Engine {
         Ok(())
     }
 
+    #[trace]
     fn select(&self, query: ast::Select, order_by: Vec<ast::OrderByExpr>) -> Result<Output> {
         let (table, expressions, selection) = match query {
             ast::Select {
@@ -349,6 +354,7 @@ impl Engine {
         }
     }
 
+    #[trace]
     fn get_table(
         &self,
         table: String,
@@ -375,6 +381,7 @@ impl Engine {
         Ok(t)
     }
 
+    #[trace]
     fn read_schema(&self, table: &str, transaction: &Transaction<'_, Database>) -> Result<Schema> {
         let bytes = transaction
             .get(table)?
@@ -383,6 +390,7 @@ impl Engine {
         Ok(schema)
     }
 
+    #[trace]
     fn read_hidden_pk(
         &self,
         cf: &ColumnFamily<'_>,

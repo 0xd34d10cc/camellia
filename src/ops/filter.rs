@@ -24,6 +24,7 @@ impl<'txn> Operation for Filter<'txn> {
         self.inner.schema()
     }
 
+    #[minitrace::trace]
     fn poll(&mut self) -> Result<Output> {
         match self.inner.poll()? {
             Output::Batch(mut batch) => {

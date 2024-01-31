@@ -40,6 +40,7 @@ impl<'txn> Operation for Eval<'txn> {
         &self.schema
     }
 
+    #[minitrace::trace]
     fn poll(&mut self) -> Result<Output> {
         let output = match self.inner.poll()? {
             Output::Finished => Output::Finished,

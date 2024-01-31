@@ -145,8 +145,8 @@ impl Engine {
                 on: None,
                 returning: None,
             } if after_columns.is_empty() => {
-                self.insert(table_name, columns, *source)?;
-                Ok(Output::Affected(1))
+                let n = self.insert(table_name, columns, *source)?;
+                Ok(Output::Affected(n))
             }
             _ => Err("Not supported".into()),
         }
@@ -213,7 +213,7 @@ impl Engine {
         name: ast::ObjectName,
         columns: Vec<ast::Ident>,
         source: ast::Query,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         let expr = match source {
             ast::Query {
                 with: None,
@@ -250,6 +250,7 @@ impl Engine {
             schema.check(row)?;
         }
 
+        let n_rows = rows.len();
         for row in rows {
             let key = table.get_key(&row);
             if transaction.get_for_update_cf(&cf, &key, true)?.is_some() {
@@ -262,7 +263,7 @@ impl Engine {
         }
 
         transaction.commit()?;
-        Ok(())
+        Ok(n_rows)
     }
 
     #[trace]

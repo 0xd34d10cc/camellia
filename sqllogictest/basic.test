@@ -2,14 +2,7 @@ statement ok
 create table t(v1 int primary key, v2 int, v3 text)
 
 statement ok
-insert into t values(1,4,'foo')
-
-statement ok
-insert into t values(2,3,'bar'), (3,4,'baz'), (4,3,'baz')
-
-# primary key constraint violation (v1=3)
-statement error
-insert into t values(5, 5, 'should not be present'), (3, 5, 'kek')
+insert into t values(1,4,'foo'), (2,3,'bar'), (3,4,'baz'), (4,3,'baz')
 
 query IIT
 select * from t

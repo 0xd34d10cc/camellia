@@ -1,0 +1,21 @@
+statement ok
+create table t(v1 int primary key, v2 int, v3 text)
+
+# simple insert
+statement ok
+insert into t values(1,4,'foo')
+
+# insert multiple values
+statment ok
+insert into t values(2,3,'bar'), (3,4,'baz'), (4,3,'baz')
+
+# insert with eval
+statement ok
+insert into t values(2+2, -42, 'kek')
+
+# primary key constraint violation (v1=3)
+statement error
+insert into t values(5, 5, 'should not be present'), (3, 5, 'kek')
+
+statement ok
+drop table t

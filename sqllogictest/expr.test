@@ -109,6 +109,9 @@ select case when a > 3 then 321 when b == 3 then 123 end from t;
 123
 321
 
+statement ok
+drop table t
+
 # TODO: make it work, currently panics
 # division by 0
 # statement error

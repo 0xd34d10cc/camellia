@@ -475,27 +475,6 @@ impl Engine {
     }
 }
 
-// fn reorder(schema: &Schema, columns: Vec<ast::Ident>, mut rows: Vec<Row>) -> Result<Vec<Row>> {
-//     for row in rows.iter_mut() {
-//         if columns.len() != row.len() {
-//             return Err("Number of values does not match number of columns".into());
-//         }
-
-//         let mut values = Vec::with_capacity(row.len());
-//         for column in schema.columns() {
-//             let index = columns
-//                 .iter()
-//                 .position(|c| c.value == column.name)
-//                 .ok_or_else(|| format!("Unknown column {}", column.name))?;
-//             values.push(row.get(index).clone());
-//         }
-
-//         *row = Row::from(values)
-//     }
-
-//     Ok(rows)
-// }
-
 fn expand_select(
     exprs: Vec<ast::SelectItem>,
     schema: &Schema,

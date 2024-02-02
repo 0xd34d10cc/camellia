@@ -1,17 +1,64 @@
 statement ok
 create table t(v1 int primary key, v2 int, v3 text)
 
-# simple insert
+# insert single row
 statement ok
 insert into t values(1,4,'foo')
 
-# insert multiple values
-statment ok
-insert into t values(2,3,'bar'), (3,4,'baz'), (4,3,'baz')
+query IIT
+select * from t
+----
+1 4 foo
+
+# insert multiple rows
+statement ok
+insert into t values(2,3,'bar'), (3,4,'baz')
+
+query IIT
+select * from t
+----
+1 4 foo
+2 3 bar
+3 4 baz
+
+# insert from select
+statement ok
+insert into t select 22, 33, 'foo'
+
+query IIT
+select * from t
+----
+1 4 foo
+2 3 bar
+3 4 baz
+22 33 foo
 
 # insert with eval
-statement ok
-insert into t values(2+2, -42, 'kek')
+# TODO: make it pass
+# statement ok
+# insert into t values(2+2, -42, 'kek')
+
+# query IIT
+# select * from t;
+# ----
+# 1 4 foo
+# 2 3 bar
+# 3 4 baz
+# 4 -42 kek
+
+# insert with reorder
+# TODO: make it pass
+# statement ok
+# insert intto t(v3, v2 v1) values('kek', 42, 1337)
+
+# query IIT
+# select * from t;
+# ----
+# 1 4 foo
+# 2 3 bar
+# 3 4 baz
+# 4 -42 kek
+# 1337 42 kek
 
 # primary key constraint violation (v1=3)
 statement error

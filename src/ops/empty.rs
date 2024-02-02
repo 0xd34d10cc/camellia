@@ -8,17 +8,14 @@ use super::{Operation, Output};
 // Source which produces single empty row
 pub struct Empty {
     schema: Schema,
-    empty: bool,
+    finished: bool,
 }
 
 impl Empty {
     pub fn new() -> Self {
         Empty {
-            schema: Schema {
-                primary_key: None,
-                columns: Vec::new(),
-            },
-            empty: false,
+            schema: Schema::empty(),
+            finished: false,
         }
     }
 }
@@ -30,7 +27,7 @@ impl Operation for Empty {
 
     #[minitrace::trace]
     fn poll(&mut self) -> Result<Output> {
-        match std::mem::replace(&mut self.empty, true) {
+        match std::mem::replace(&mut self.finished, true) {
             true => Ok(Output::Finished),
             false => {
                 let empty_row = Row::from(Vec::new());

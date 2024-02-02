@@ -3,17 +3,17 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
+use minitrace::trace;
 use rocksdb::{IteratorMode, Options, Transaction};
 use sqlparser::ast;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
-use minitrace::trace;
 
 use crate::expression::Expression;
-use crate::ops::{self, Empty as EmptySource, Eval, Filter, FullScan, Operation, Sort};
-use crate::schema::Schema;
+use crate::ops::{self, Empty as EmptySource, Eval, Filter, FullScan, Operation, Sort, Values};
+use crate::schema::{Column, Schema};
 use crate::table::Table;
-use crate::types::{Database, Result, Row, RowSet, Value};
+use crate::types::{Database, Result, Row, RowSet};
 
 type ColumnFamily<'db> = Arc<rocksdb::BoundColumnFamily<'db>>;
 
@@ -152,25 +152,24 @@ impl Engine {
         }
     }
 
+    #[trace]
     fn query(&self, query: ast::Query) -> Result<Output> {
-        let (query, order_by) = match query {
-            ast::Query {
-                with: None,
-                body,
-                order_by,
-                limit: None,
-                limit_by,
-                offset: None,
-                fetch: None,
-                locks,
-                for_clause: None,
-            } if limit_by.is_empty() && locks.is_empty() => (*body, order_by),
-            _ => return Err("Not implemented".into()),
-        };
-
-        match query {
-            ast::SetExpr::Select(select) => self.select(*select, order_by),
-            _ => Err("Unsupported query kind".into()),
+        let transaction = self.db.transaction();
+        let mut source = self.build_query(query, &transaction)?;
+        let mut rows = Vec::new();
+        loop {
+            match source.poll() {
+                Ok(ops::Output::Finished) => {
+                    break Ok(Output::Rows(RowSet {
+                        rows,
+                        schema: source.schema().clone(),
+                    }))
+                }
+                Ok(ops::Output::Batch(mut batch)) => {
+                    rows.append(&mut batch);
+                }
+                Err(e) => break Err(e),
+            }
         }
     }
 
@@ -211,10 +210,63 @@ impl Engine {
     fn insert(
         &self,
         name: ast::ObjectName,
-        columns: Vec<ast::Ident>,
+        _columns: Vec<ast::Ident>,
         source: ast::Query,
     ) -> Result<usize> {
-        let expr = match source {
+        let table = name.to_string();
+        let cf = self.db.cf_handle(&table).ok_or("No such table")?;
+
+        let transaction = self.db.transaction();
+        let mut source = self.build_query(source, &transaction)?;
+
+        let table = self.get_table(table, &cf, &transaction)?;
+        let schema = table.schema();
+        // TODO: support column reordering
+        // if !columns.is_empty() {
+        //     source =
+        // }
+
+        // Check that source stream matches table schema
+        schema.check_compatible(source.schema())?;
+        let mut n_rows = 0;
+
+        let mut key = Vec::new();
+        let mut value = Vec::new();
+        loop {
+            match source.poll() {
+                Ok(ops::Output::Finished) => {
+                    break;
+                }
+                Ok(ops::Output::Batch(batch)) => {
+                    for row in batch {
+                        key.clear();
+                        value.clear();
+
+                        table.get_key(&row, &mut key);
+                        if transaction.get_for_update_cf(&cf, &key, true)?.is_some() {
+                            return Err("Entry with such primary key already exist".into());
+                        }
+
+                        row.serialize(&mut value)?;
+                        transaction.put_cf(&cf, &key, &value)?;
+                        n_rows += 1;
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        drop(source);
+        transaction.commit()?;
+        Ok(n_rows)
+    }
+
+    fn build_query<'txn>(
+        &self,
+        query: ast::Query,
+        transaction: &'txn Transaction<'_, Database>,
+    ) -> Result<Box<dyn Operation + 'txn>> {
+        let (query, order_by) = match query {
             ast::Query {
                 with: None,
                 body,
@@ -225,49 +277,23 @@ impl Engine {
                 fetch: None,
                 locks,
                 for_clause: None,
-            } if order_by.is_empty() && limit_by.is_empty() && locks.is_empty() => *body,
-            _ => return Err("Unsupported insert statement kind".into()),
+            } if limit_by.is_empty() && locks.is_empty() => (*body, order_by),
+            _ => return Err("Not implemented".into()),
         };
 
-        let rows = match expr {
-            ast::SetExpr::Values(values) => create_row(values)?,
-            _ => return Err("Unsupported insert expression kind".into()),
-        };
-
-        let table = name.to_string();
-        let cf = self.db.cf_handle(&table).ok_or("No such table")?;
-
-        let transaction = self.db.transaction();
-        let table = self.get_table(table, &cf, &transaction)?;
-        let schema = table.schema();
-        let rows = if columns.is_empty() {
-            rows
-        } else {
-            reorder(schema, columns, rows)?
-        };
-
-        for row in &rows {
-            schema.check(row)?;
+        match query {
+            ast::SetExpr::Select(select) => self.build_select(*select, order_by, transaction),
+            ast::SetExpr::Values(values) => self.build_values(values),
+            _ => Err("Unsupported query kind".into()),
         }
-
-        let n_rows = rows.len();
-        for row in rows {
-            let key = table.get_key(&row);
-            if transaction.get_for_update_cf(&cf, &key, true)?.is_some() {
-                return Err("Entry with such primary key already exist".into());
-            }
-
-            let mut value = Vec::new();
-            row.serialize(&mut value)?;
-            transaction.put_cf(&cf, &key, value)?;
-        }
-
-        transaction.commit()?;
-        Ok(n_rows)
     }
 
-    #[trace]
-    fn select(&self, query: ast::Select, order_by: Vec<ast::OrderByExpr>) -> Result<Output> {
+    fn build_select<'txn>(
+        &self,
+        query: ast::Select,
+        order_by: Vec<ast::OrderByExpr>,
+        transaction: &'txn Transaction<'_, Database>,
+    ) -> Result<Box<dyn Operation + 'txn>> {
         let (table, expressions, selection) = match query {
             ast::Select {
                 distinct: None,
@@ -316,11 +342,10 @@ impl Engine {
             _ => return Err("Unsupported select kind".into()),
         };
 
-        let transaction = self.db.transaction();
         let mut source = match table {
             Some(table) => {
                 let cf = self.db.cf_handle(&table).ok_or("No such table")?;
-                let table = self.get_table(table, &cf, &transaction)?;
+                let table = self.get_table(table, &cf, transaction)?;
                 let schema = table.schema().clone();
 
                 let iter = transaction.iterator_cf(&cf, IteratorMode::Start);
@@ -341,18 +366,58 @@ impl Engine {
             source = Box::new(sort);
         }
 
-        let mut source = Eval::new(expressions, schema, source)?;
-        let schema = source.schema().clone();
-        let mut rows = Vec::new();
-        loop {
-            match source.poll() {
-                Ok(ops::Output::Finished) => break Ok(Output::Rows(RowSet { rows, schema })),
-                Ok(ops::Output::Batch(mut batch)) => {
-                    rows.append(&mut batch);
-                }
-                Err(e) => break Err(e),
+        let source = Eval::new(expressions, schema, source)?;
+        Ok(Box::new(source))
+    }
+
+    fn build_values<'txn>(&self, values: ast::Values) -> Result<Box<dyn Operation + 'txn>> {
+        fn build_row(exprs: Vec<ast::Expr>) -> Result<Row> {
+            let empty_row = Row::from(Vec::new());
+            let empty_schema = Schema::empty();
+
+            let mut values = Vec::with_capacity(exprs.len());
+            for expr in exprs {
+                let e = Expression::parse(expr, &empty_schema)?;
+                values.push(e.eval(&empty_row)?);
             }
+
+            Ok(Row::from(values))
         }
+
+        let mut rows = values.rows.into_iter();
+        // get first row to infer schema
+        let first = match rows.next() {
+            Some(exprs) => build_row(exprs)?,
+            None => {
+                // empty values
+                let values = Values::new(Vec::new(), Schema::empty())?;
+                return Ok(Box::new(values));
+            }
+        };
+
+        let schema = Schema {
+            primary_key: None,
+            columns: first
+                .values()
+                .enumerate()
+                .map(|(i, val)| Column {
+                    name: format!("value{}", i),
+                    type_: val.type_(),
+                })
+                .collect(),
+        };
+
+        let mut values = Vec::with_capacity(rows.len() + 1);
+        values.push(first);
+
+        for exprs in rows {
+            let row = build_row(exprs)?;
+            schema.check(&row)?;
+            values.push(row);
+        }
+
+        let values = Values::new(values, schema)?;
+        Ok(Box::new(values))
     }
 
     #[trace]
@@ -410,56 +475,31 @@ impl Engine {
     }
 }
 
-fn create_row(values: ast::Values) -> Result<Vec<Row>> {
-    if values.explicit_row {
-        return Err("Explicit row is not supported".into());
-    }
+// fn reorder(schema: &Schema, columns: Vec<ast::Ident>, mut rows: Vec<Row>) -> Result<Vec<Row>> {
+//     for row in rows.iter_mut() {
+//         if columns.len() != row.len() {
+//             return Err("Number of values does not match number of columns".into());
+//         }
 
-    let mut rows = Vec::new();
-    for tuple in values.rows {
-        let mut row = Vec::new();
-        for column in tuple {
-            let value = match column {
-                ast::Expr::Value(value) => Value::try_from(value)?,
-                _ => return Err("Unsupported expression type (create_row)".into()),
-            };
+//         let mut values = Vec::with_capacity(row.len());
+//         for column in schema.columns() {
+//             let index = columns
+//                 .iter()
+//                 .position(|c| c.value == column.name)
+//                 .ok_or_else(|| format!("Unknown column {}", column.name))?;
+//             values.push(row.get(index).clone());
+//         }
 
-            row.push(value)
-        }
+//         *row = Row::from(values)
+//     }
 
-        rows.push(Row::from(row))
-    }
-
-    Ok(rows)
-}
-
-fn reorder(schema: &Schema, columns: Vec<ast::Ident>, mut rows: Vec<Row>) -> Result<Vec<Row>> {
-    for row in rows.iter_mut() {
-        if columns.len() != row.len() {
-            return Err("Number of values does not match number of columns".into());
-        }
-
-        let mut values = Vec::with_capacity(row.len());
-        for column in schema.columns() {
-            let index = columns
-                .iter()
-                .position(|c| c.value == column.name)
-                .ok_or_else(|| format!("Unknown column {}", column.name))?;
-            values.push(row.get(index).clone());
-        }
-
-        *row = Row::from(values)
-    }
-
-    Ok(rows)
-}
+//     Ok(rows)
+// }
 
 fn expand_select(
     exprs: Vec<ast::SelectItem>,
     schema: &Schema,
 ) -> Result<(Schema, Vec<Expression>)> {
-    use crate::schema::Column;
-
     let mut columns = Vec::with_capacity(exprs.len());
     let mut expressions = Vec::with_capacity(exprs.len());
     for item in exprs {

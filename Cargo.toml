@@ -7,15 +7,16 @@ edition = "2021"
 bincode = "1.3.3"
 comfy-table = "7.1.0"
 dotenvy = "0.15.7"
+rocksdb = { version = "0.21.0", features = ["multi-threaded-cf"] }
+rustyline = "13.0.0"
+serde = { version = "1.0.193", features = ["derive"] }
+sqlparser = { version = "0.40.0", features = ["serde"] }
+# tracing & deps
 minitrace = { version = "0.6.3", features = ["enable"] }
 minitrace-opentelemetry = "0.6.3"
 opentelemetry = "0.21.0"
 opentelemetry-otlp = "0.14.0"
 opentelemetry_sdk = "0.21.2"
-rocksdb = { version = "0.21.0", features = ["multi-threaded-cf"] }
-rustyline = "13.0.0"
-serde = { version = "1.0.193", features = ["derive"] }
-sqlparser = { version = "0.40.0", features = ["serde"] }
 tokio = { version = "1.35.1", features = ["macros", "rt-multi-thread"] }
 
 [dev-dependencies]

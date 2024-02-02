@@ -1,17 +1,19 @@
 use crate::schema::Schema;
 use crate::types::{Result, Row};
 
+mod empty;
+mod eval;
 mod filter;
 mod fullscan;
-mod eval;
 mod sort;
-mod empty;
+mod values;
 
+pub use empty::Empty;
+pub use eval::Eval;
 pub use filter::Filter;
 pub use fullscan::FullScan;
-pub use eval::Eval;
 pub use sort::Sort;
-pub use empty::Empty;
+pub use values::Values;
 
 pub enum Output {
     Batch(Vec<Row>),

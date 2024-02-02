@@ -18,8 +18,7 @@ impl Table {
         }
     }
 
-    pub fn get_key(&self, row: &Row) -> Vec<u8> {
-        let mut key = Vec::new();
+    pub fn get_key(&self, row: &Row, key: &mut Vec<u8>) {
         match self.schema.primary_key {
             None => {
                 let bytes = self.hidden_pk.fetch_add(1, Ordering::Relaxed).to_be_bytes();
@@ -32,7 +31,6 @@ impl Table {
                 Value::String(val) => key.extend_from_slice(val.as_bytes()),
             },
         };
-        key
     }
 
     pub fn schema(&self) -> &Schema {

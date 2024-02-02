@@ -15,6 +15,13 @@ pub struct Schema {
 }
 
 impl Schema {
+    pub fn empty() -> Self {
+        Schema {
+            primary_key: None,
+            columns: Vec::new(),
+        }
+    }
+
     pub fn new(desc: Vec<ast::ColumnDef>) -> Result<Self> {
         let mut columns = Vec::with_capacity(desc.len());
         let mut primary_key = None;
@@ -34,6 +41,28 @@ impl Schema {
 
     pub fn columns(&self) -> impl Iterator<Item = &Column> {
         self.columns.iter()
+    }
+
+    pub fn check_compatible(&self, other: &Schema) -> Result<()> {
+        if self.columns.len() != other.columns.len() {
+            return Err(format!(
+                "Number of columns does not match: expected {} but got {}",
+                self.columns.len(),
+                other.columns.len()
+            )
+            .into());
+        }
+
+        for (this, other) in self.columns.iter().zip(other.columns()) {
+            if this.type_ != other.type_ {
+                return Err(format!(
+                    "Column {} type mismatch: expected {} but got {}",
+                    this.name, this.type_, other.type_
+                ).into());
+            }
+        }
+
+        Ok(())
     }
 
     pub fn check(&self, row: &Row) -> Result<()> {

@@ -23,12 +23,12 @@ impl Row {
         Ok(())
     }
 
-    pub fn values(&self) -> impl Iterator<Item = &Value> {
-        self.0.iter()
-    }
-
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &Value> {
+        self.0.iter()
     }
 
     pub fn get(&self, i: usize) -> &Value {

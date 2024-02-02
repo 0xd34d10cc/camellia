@@ -371,7 +371,7 @@ impl Engine {
         Ok(Box::new(source))
     }
 
-    fn build_values<'txn>(&self, values: ast::Values) -> Result<Box<dyn Operation + 'txn>> {
+    fn build_values(&self, values: ast::Values) -> Result<Box<dyn Operation>> {
         fn build_row(exprs: Vec<ast::Expr>) -> Result<Row> {
             let empty_row = Row::from(Vec::new());
             let empty_schema = Schema::empty();
@@ -402,7 +402,7 @@ impl Engine {
                 .values()
                 .enumerate()
                 .map(|(i, val)| Column {
-                    name: format!("column{}", i),
+                    name: format!("column{}", i+1),
                     type_: val.type_(),
                 })
                 .collect(),

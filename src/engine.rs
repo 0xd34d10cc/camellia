@@ -283,7 +283,8 @@ impl Engine {
 
         match query {
             ast::SetExpr::Select(select) => self.build_select(*select, order_by, transaction),
-            ast::SetExpr::Values(values) => self.build_values(values),
+            // TODO: support order_by for values
+            ast::SetExpr::Values(values) if order_by.is_empty() => self.build_values(values),
             _ => Err("Unsupported query kind".into()),
         }
     }
@@ -294,7 +295,7 @@ impl Engine {
         order_by: Vec<ast::OrderByExpr>,
         transaction: &'txn Transaction<'_, Database>,
     ) -> Result<Box<dyn Operation + 'txn>> {
-        let (table, expressions, selection) = match query {
+        let (table, expressions, where_) = match query {
             ast::Select {
                 distinct: None,
                 top: None,
@@ -354,8 +355,8 @@ impl Engine {
             None => Box::new(EmptySource::new()) as Box<dyn Operation>,
         };
 
-        if let Some(selection) = selection {
-            let filter = Filter::new(selection, source)?;
+        if let Some(where_) = where_ {
+            let filter = Filter::new(where_, source)?;
             source = Box::new(filter)
         }
 
@@ -401,7 +402,7 @@ impl Engine {
                 .values()
                 .enumerate()
                 .map(|(i, val)| Column {
-                    name: format!("value{}", i),
+                    name: format!("column{}", i),
                     type_: val.type_(),
                 })
                 .collect(),
